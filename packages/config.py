@@ -11,4 +11,4 @@ class Settings(BaseSettings):
     shiprocket_base_url: str = "http://localhost:9000/shiprocket"
 
 
-settings = Settings()  # type: ignore[call-arg]
+settings = Settings()  # type: ignore[call-arg]  # pydantic-settings metaclass

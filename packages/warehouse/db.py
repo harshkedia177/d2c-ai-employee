@@ -12,5 +12,13 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSe
 @asynccontextmanager
 async def session_scope(tenant_id: str):
     async with SessionLocal() as session:
-        await session.execute(text("SET LOCAL app.tenant_id = :t"), {"t": tenant_id})
-        yield session
+        try:
+            await session.execute(
+                text("SELECT set_config('app.tenant_id', :t, true)"),
+                {"t": tenant_id},
+            )
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
