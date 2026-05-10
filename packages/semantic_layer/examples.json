@@ -1,0 +1,50 @@
+[
+  {
+    "question": "What's my GMV last 30 days?",
+    "plan": [
+      {"tool": "compute_metric", "args": {"metric_id": "gmv", "filters": {"placed_at__gte": "2026-04-10"}}}
+    ]
+  },
+  {
+    "question": "What's my AOV by month?",
+    "plan": [
+      {"tool": "compute_metric", "args": {"metric_id": "aov", "dimensions": ["month"]}}
+    ]
+  },
+  {
+    "question": "What's my RTO rate?",
+    "plan": [
+      {"tool": "compute_metric", "args": {"metric_id": "rto_rate"}}
+    ]
+  },
+  {
+    "question": "Which pincodes have the worst RTO rate over 90 days?",
+    "plan": [
+      {"tool": "compute_metric", "args": {"metric_id": "pincode_rto_rate_90d", "dimensions": ["pincode"]}}
+    ]
+  },
+  {
+    "question": "What's my CAC by Meta campaign?",
+    "plan": [
+      {"tool": "compute_metric", "args": {"metric_id": "cac", "dimensions": ["campaign"]}}
+    ]
+  },
+  {
+    "question": "What's my post-RTO ROAS by campaign last 7 days?",
+    "plan": [
+      {"tool": "compute_metric", "args": {"metric_id": "post_rto_roas", "dimensions": ["campaign"], "filters": {"date__gte": "2026-05-03"}}}
+    ]
+  },
+  {
+    "question": "What's my contribution margin per order?",
+    "plan": [
+      {"tool": "compute_metric", "args": {"metric_id": "contribution_margin_per_order"}}
+    ]
+  },
+  {
+    "question": "Which SKUs have the highest RTO?",
+    "plan": [
+      {"tool": "compute_metric", "args": {"metric_id": "sku_rto_rate_90d", "dimensions": ["sku"]}}
+    ]
+  }
+]

@@ -1,0 +1,175 @@
+metrics:
+  gmv:
+    description: Gross merchandise value (sum of order totals)
+    grain: order
+    sources: [core.order]
+    sql_aggregation: SUM(o.total)
+    base_alias: o
+    base_table: 'core."order"'
+    citation_select: |
+      o.source_system AS _source_system,
+      o.source_id AS _source_id,
+      o.source_record_url AS _source_record_url,
+      o.raw_table AS _raw_table,
+      o.raw_row_id AS _raw_row_id
+
+  aov:
+    description: Average order value
+    grain: order
+    sources: [core.order]
+    sql_aggregation: AVG(o.total)
+    base_alias: o
+    base_table: 'core."order"'
+    citation_select: |
+      o.source_system AS _source_system,
+      o.source_id AS _source_id,
+      o.source_record_url AS _source_record_url,
+      o.raw_table AS _raw_table,
+      o.raw_row_id AS _raw_row_id
+
+  rto_rate:
+    description: Share of shipped orders that ended in RTO
+    grain: shipment
+    sources: [core.shipment]
+    sql_aggregation: |
+      SUM(CASE WHEN s.is_rto THEN 1 ELSE 0 END)::numeric
+      / NULLIF(COUNT(*), 0)
+    base_alias: s
+    base_table: core.shipment
+    citation_select: |
+      s.source_system AS _source_system,
+      s.source_id AS _source_id,
+      s.source_record_url AS _source_record_url,
+      s.raw_table AS _raw_table,
+      s.raw_row_id AS _raw_row_id
+
+  cac:
+    description: Customer acquisition cost (Meta spend / Shopify orders)
+    grain: campaign_day
+    sources: [core.ad_spend_daily, 'core."order"', core.campaign]
+    sql_aggregation: SUM(asd.spend) / NULLIF(COUNT(DISTINCT o.canonical_id), 0)
+    base_alias: asd
+    base_table: core.ad_spend_daily
+    joins: |
+      LEFT JOIN core.campaign c
+        ON c.tenant_id = asd.tenant_id AND c.canonical_id = asd.campaign_canonical_id
+      LEFT JOIN core."order" o
+        ON o.tenant_id = asd.tenant_id
+        AND DATE(o.placed_at) = asd.date
+        AND o.utm_campaign = c.name
+    citation_select: |
+      asd.source_system AS _source_system,
+      asd.source_id AS _source_id,
+      asd.source_record_url AS _source_record_url,
+      asd.raw_table AS _raw_table,
+      asd.raw_row_id AS _raw_row_id
+
+  post_rto_roas:
+    description: Revenue net of RTO / Meta spend
+    grain: campaign_day
+    sources: [core.ad_spend_daily, 'core."order"', core.shipment, core.campaign]
+    sql_aggregation: |
+      SUM(CASE WHEN COALESCE(s.is_rto, false) THEN 0 ELSE COALESCE(o.total, 0) END)
+      / NULLIF(SUM(asd.spend), 0)
+    base_alias: asd
+    base_table: core.ad_spend_daily
+    joins: |
+      LEFT JOIN core.campaign c
+        ON c.tenant_id = asd.tenant_id AND c.canonical_id = asd.campaign_canonical_id
+      LEFT JOIN core."order" o
+        ON o.tenant_id = asd.tenant_id
+        AND DATE(o.placed_at) = asd.date
+        AND o.utm_campaign = c.name
+      LEFT JOIN core.shipment s
+        ON s.tenant_id = o.tenant_id AND s.order_canonical_id = o.canonical_id
+    citation_select: |
+      asd.source_system AS _source_system,
+      asd.source_id AS _source_id,
+      asd.source_record_url AS _source_record_url,
+      asd.raw_table AS _raw_table,
+      asd.raw_row_id AS _raw_row_id
+
+  contribution_margin_per_order:
+    description: Order total - shipping - RTO writeoff (rough; v0 ignores allocated Meta spend)
+    grain: order
+    sources: ['core."order"', core.shipment]
+    sql_aggregation: |
+      AVG(
+        COALESCE(o.total, 0)
+        - COALESCE(s.freight_amount, 0)
+        - CASE WHEN COALESCE(s.is_rto, false)
+            THEN 2 * COALESCE(s.freight_amount, 60)
+            ELSE 0
+          END
+      )
+    base_alias: o
+    base_table: 'core."order"'
+    joins: |
+      LEFT JOIN core.shipment s
+        ON s.tenant_id = o.tenant_id AND s.order_canonical_id = o.canonical_id
+    citation_select: |
+      o.source_system AS _source_system,
+      o.source_id AS _source_id,
+      o.source_record_url AS _source_record_url,
+      o.raw_table AS _raw_table,
+      o.raw_row_id AS _raw_row_id
+
+  pincode_rto_rate_90d:
+    description: 90-day RTO rate by shipping pincode (gates n>=20)
+    grain: pincode
+    sources: ['core."order"', core.shipment]
+    sql_aggregation: |
+      SUM(CASE WHEN s.is_rto THEN 1 ELSE 0 END)::numeric
+      / NULLIF(COUNT(*), 0)
+    base_alias: s
+    base_table: core.shipment
+    joins: |
+      INNER JOIN core."order" o
+        ON o.tenant_id = s.tenant_id AND o.canonical_id = s.order_canonical_id
+    min_sample_size: 20
+    citation_select: |
+      s.source_system AS _source_system,
+      s.source_id AS _source_id,
+      s.source_record_url AS _source_record_url,
+      s.raw_table AS _raw_table,
+      s.raw_row_id AS _raw_row_id
+
+  sku_rto_rate_90d:
+    description: 90-day RTO rate by SKU
+    grain: sku
+    sources: ['core."order"', core.order_line, core.shipment]
+    sql_aggregation: |
+      SUM(CASE WHEN s.is_rto THEN 1 ELSE 0 END)::numeric
+      / NULLIF(COUNT(*), 0)
+    base_alias: s
+    base_table: core.shipment
+    joins: |
+      INNER JOIN core."order" o
+        ON o.tenant_id = s.tenant_id AND o.canonical_id = s.order_canonical_id
+      INNER JOIN core.order_line ol
+        ON ol.tenant_id = o.tenant_id AND ol.order_canonical_id = o.canonical_id
+    min_sample_size: 10
+    citation_select: |
+      s.source_system AS _source_system,
+      s.source_id AS _source_id,
+      s.source_record_url AS _source_record_url,
+      s.raw_table AS _raw_table,
+      s.raw_row_id AS _raw_row_id
+
+dimensions:
+  campaign:
+    sql: c.name
+  ad_id:
+    sql: asd.ad_id
+  pincode:
+    sql: o.shipping_pincode
+  sku:
+    sql: ol.sku
+  gateway:
+    sql: o.gateway
+  date:
+    sql: DATE(o.placed_at)
+  week:
+    sql: "DATE_TRUNC('week', o.placed_at)::date"
+  month:
+    sql: "DATE_TRUNC('month', o.placed_at)::date"
