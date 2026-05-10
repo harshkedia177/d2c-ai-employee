@@ -1,0 +1,126 @@
+# Golden eval set — representative prompts that exercise each metric and
+# common dimension combinations. Each entry scripts the FakeLLMClient
+# tool-use sequence and asserts the rendered text + citation footprint.
+#
+# Coverage rule: every metric_id in the semantic layer must appear in at
+# least one prompt's must_cite_metric_id (enforced by
+# test_every_metric_id_appears_in_golden).
+
+- id: q01_gmv_total
+  prompt: "What's my GMV?"
+  script:
+    - tool: compute_metric
+      args: {metric_id: gmv}
+    - text: "Your GMV is {{m:gmv_0}}."
+  expected_substring_in_text: "₹"
+  must_cite_metric_id: gmv
+
+- id: q02_gmv_last_30_days
+  prompt: "What's my GMV last 30 days?"
+  script:
+    - tool: compute_metric
+      args:
+        metric_id: gmv
+        filters: {placed_at__gte: "2026-04-10"}
+    - text: "GMV in the requested window: {{m:gmv_0}}."
+  expected_substring_in_text: "₹"
+  must_cite_metric_id: gmv
+
+- id: q03_aov_by_month
+  prompt: "What's my AOV by month?"
+  script:
+    - tool: compute_metric
+      args:
+        metric_id: aov
+        dimensions: [month]
+    - text: "Here's AOV by month — see footnotes for breakdown."
+  expected_substring_in_text: "AOV"
+  must_cite_metric_id: aov
+
+- id: q04_rto_rate
+  prompt: "What's my RTO rate?"
+  script:
+    - tool: compute_metric
+      args: {metric_id: rto_rate}
+    - text: "Your RTO rate is {{m:rto_rate_0}}."
+  expected_substring_in_text: "%"
+  must_cite_metric_id: rto_rate
+
+- id: q05_rto_by_pincode
+  prompt: "Which pincodes have the worst RTO?"
+  script:
+    - tool: compute_metric
+      args: {metric_id: pincode_rto_rate_90d, dimensions: [pincode]}
+    - text: "Here are the worst pincodes — see footnotes."
+  expected_substring_in_text: "pincode"
+  must_cite_metric_id: pincode_rto_rate_90d
+
+- id: q06_cac_by_campaign
+  prompt: "What's my CAC by campaign?"
+  script:
+    - tool: compute_metric
+      args: {metric_id: cac, dimensions: [campaign]}
+    - text: "CAC by campaign — see footnotes for figures."
+  expected_substring_in_text: "campaign"
+  must_cite_metric_id: cac
+
+- id: q07_post_rto_roas_last_week
+  prompt: "What's my post-RTO ROAS by campaign last 7 days?"
+  script:
+    - tool: compute_metric
+      args:
+        metric_id: post_rto_roas
+        dimensions: [campaign]
+        filters: {date__gte: "2026-05-03"}
+    - text: "Post-RTO ROAS by campaign over last 7d — see footnotes."
+  expected_substring_in_text: "ROAS"
+  must_cite_metric_id: post_rto_roas
+
+- id: q08_contribution_margin
+  prompt: "What's my contribution margin per order?"
+  script:
+    - tool: compute_metric
+      args: {metric_id: contribution_margin_per_order}
+    - text: "Contribution margin per order: {{m:contribution_margin_per_order_0}}."
+  expected_substring_in_text: "₹"
+  must_cite_metric_id: contribution_margin_per_order
+
+- id: q09_sku_rto
+  prompt: "Which SKUs have the highest RTO?"
+  script:
+    - tool: compute_metric
+      args: {metric_id: sku_rto_rate_90d, dimensions: [sku]}
+    - text: "SKUs ranked by RTO rate — see footnotes."
+  expected_substring_in_text: "SKU"
+  must_cite_metric_id: sku_rto_rate_90d
+
+- id: q10_search_rows
+  prompt: "Show me orders from Cash on Delivery."
+  script:
+    - tool: search_rows
+      args: {entity: order, filter: {gateway: "Cash on Delivery"}, limit: 10}
+    - text: "Here are recent COD orders — see the table."
+  expected_substring_in_text: "COD"
+  must_cite_metric_id: null
+
+- id: q11_propose_write_dry_run
+  prompt: "Pause underperforming campaigns."
+  script:
+    - tool: propose_write
+      args:
+        action_type: pause_campaign
+        payload: {summary: "would pause some campaigns", row_pks: ["c1","c2","c3"]}
+    - text: "Drafted a pause proposal — review the diff before approving."
+  expected_substring_in_text: "Drafted"
+  must_cite_metric_id: null
+
+- id: q12_two_metrics_one_answer
+  prompt: "What's my GMV and AOV?"
+  script:
+    - tool: compute_metric
+      args: {metric_id: gmv}
+    - tool: compute_metric
+      args: {metric_id: aov}
+    - text: "GMV {{m:gmv_0}}, AOV {{m:aov_0}}."
+  expected_substring_in_text: "₹"
+  must_cite_metric_id: gmv
