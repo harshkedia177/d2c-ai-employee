@@ -1,0 +1,48 @@
+[project]
+name = "d2c-ai-employee"
+version = "0.1.0"
+description = "D2C AI Employee v0"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi[standard]>=0.115",
+  "uvicorn[standard]>=0.32",
+  "sqlalchemy[asyncio]>=2.0.36",
+  "asyncpg>=0.30",
+  "psycopg[binary]>=3.2",
+  "alembic>=1.14",
+  "pydantic>=2.10",
+  "pydantic-settings>=2.7",
+  "redis[hiredis]>=5.2",
+  "httpx>=0.28",
+  "google-genai>=0.3",
+  "pgvector>=0.3",
+  "structlog>=24.4",
+  "tenacity>=9.0",
+  "orjson>=3.10",
+  "pyyaml>=6.0",
+  "faker>=33.1",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  "pytest-cov>=6.0",
+  "pytest-postgresql>=6.1",
+  "ruff>=0.8",
+  "mypy>=1.13",
+  "respx>=0.22",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "B", "UP", "SIM", "TCH"]
+ignore = ["E501"]
