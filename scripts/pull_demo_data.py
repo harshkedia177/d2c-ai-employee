@@ -18,19 +18,26 @@ import argparse
 import asyncio
 import json
 import logging
+import sys
 import uuid
+from pathlib import Path
 from typing import Any
 
-from sqlalchemy import text
+# Ensure the repo root is on sys.path so `import packages.*` works when run as a script.
+_ROOT_FOR_IMPORT = Path(__file__).parent.parent
+if str(_ROOT_FOR_IMPORT) not in sys.path:
+    sys.path.insert(0, str(_ROOT_FOR_IMPORT))
 
-from packages.config import settings
-from packages.connectors.base import Checkpoint, Record
-from packages.connectors.meta_ads.connector import MetaAdsConnector
-from packages.connectors.shiprocket.connector import ShiprocketConnector
-from packages.connectors.shopify.connector import ShopifyConnector
-from packages.scaffolding.queues import enqueue
-from packages.scaffolding.rate_limit import TokenBucket
-from packages.warehouse.db import SessionLocal
+from sqlalchemy import text  # noqa: E402
+
+from packages.config import settings  # noqa: E402
+from packages.connectors.base import Checkpoint, Record  # noqa: E402
+from packages.connectors.meta_ads.connector import MetaAdsConnector  # noqa: E402
+from packages.connectors.shiprocket.connector import ShiprocketConnector  # noqa: E402
+from packages.connectors.shopify.connector import ShopifyConnector  # noqa: E402
+from packages.scaffolding.queues import enqueue  # noqa: E402
+from packages.scaffolding.rate_limit import TokenBucket  # noqa: E402
+from packages.warehouse.db import SessionLocal  # noqa: E402
 
 log = logging.getLogger(__name__)
 

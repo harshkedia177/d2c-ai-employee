@@ -17,13 +17,18 @@ import sys
 import time
 from pathlib import Path
 
-from sqlalchemy import text
+# Ensure the repo root is on sys.path so `import packages.*` works when run as a script.
+_ROOT_FOR_IMPORT = Path(__file__).parent.parent
+if str(_ROOT_FOR_IMPORT) not in sys.path:
+    sys.path.insert(0, str(_ROOT_FOR_IMPORT))
 
-from packages.agents.scheduler import (
+from sqlalchemy import text  # noqa: E402
+
+from packages.agents.scheduler import (  # noqa: E402
     run_meta_pauser_for_tenant,
     run_pincode_blocker_for_tenant,
 )
-from packages.warehouse.db import SessionLocal
+from packages.warehouse.db import SessionLocal  # noqa: E402
 
 log = logging.getLogger(__name__)
 
