@@ -12,20 +12,6 @@ from packages.agents.meta_pauser import (
 from packages.warehouse.db import SessionLocal
 
 
-@pytest.fixture(autouse=True)
-async def _cleanup():
-    yield
-    async with SessionLocal() as s:
-        await s.execute(
-            text(
-                "DELETE FROM core.agent_runs "
-                "WHERE agent_id = 'meta_pauser' "
-                "AND triggered_at < now() - interval '5 minutes'"
-            )
-        )
-        await s.commit()
-
-
 def _camp(**kw) -> CampaignSnapshot:
     base = dict(
         campaign_id="c1",

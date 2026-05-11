@@ -15,20 +15,6 @@ from packages.agents.pincode_cod_blocker import (
 from packages.warehouse.db import SessionLocal
 
 
-@pytest.fixture(autouse=True)
-async def _cleanup():
-    yield
-    async with SessionLocal() as s:
-        await s.execute(
-            text(
-                "DELETE FROM core.agent_runs "
-                "WHERE agent_id = 'pincode_cod_blocker' "
-                "AND triggered_at < now() - interval '5 minutes'"
-            )
-        )
-        await s.commit()
-
-
 def test_should_not_block_below_min_sample():
     p = PincodeStat(pincode="110084", rto_rate=0.50, sample_size=15, avg_cart_value=2000)
     assert _should_block(p, DEFAULT_MARGIN_PCT) is False

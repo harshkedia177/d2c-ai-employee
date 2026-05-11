@@ -148,21 +148,14 @@ async def _insert_ad_spend(
 
 @pytest.fixture
 async def _scheduler_cleanup():
-    """Track tenant ids per-test and clean only those rows afterward."""
+    """No-op fixture kept for API compatibility.
+
+    Each test uses a fresh-UUID tenant_id, so rows from different test runs
+    don't collide. We intentionally do NOT delete here — that previously
+    wiped demo data and made `make demo` non-idempotent across test runs.
+    """
     created: list[str] = []
     yield created
-    if not created:
-        return
-    async with SessionLocal() as s:
-        for tid in created:
-            await s.execute(text("DELETE FROM core.agent_runs WHERE tenant_id = :t"), {"t": tid})
-            await s.execute(
-                text("DELETE FROM core.ad_spend_daily WHERE tenant_id = :t"), {"t": tid}
-            )
-            await s.execute(text("DELETE FROM core.campaign WHERE tenant_id = :t"), {"t": tid})
-            await s.execute(text("DELETE FROM core.shipment WHERE tenant_id = :t"), {"t": tid})
-            await s.execute(text('DELETE FROM core."order" WHERE tenant_id = :t'), {"t": tid})
-        await s.commit()
 
 
 @pytest.mark.asyncio

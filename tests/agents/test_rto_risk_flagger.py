@@ -20,20 +20,6 @@ from packages.agents.rto_risk_flagger import (
 from packages.warehouse.db import SessionLocal
 
 
-@pytest.fixture(autouse=True)
-async def _cleanup():
-    yield
-    async with SessionLocal() as s:
-        await s.execute(
-            text(
-                "DELETE FROM core.agent_runs "
-                "WHERE agent_id = 'rto_risk_flagger' "
-                "AND triggered_at < now() - interval '5 minutes'"
-            )
-        )
-        await s.commit()
-
-
 def _features(**overrides) -> RTOFeatures:
     base = dict(
         pincode_rto_rate=0.0,

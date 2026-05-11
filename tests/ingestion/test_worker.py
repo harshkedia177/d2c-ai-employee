@@ -42,7 +42,7 @@ async def _insert_raw_shopify_order(tenant_id: str, payload: dict) -> int:
                 "sid": str(payload["id"]),
                 "p": p_str,
                 "h": p_hash,
-                "u": f"https://m000.myshopify.com/admin/orders/{payload['id']}",
+                "u": f"https://test.example.com/admin/orders/{payload['id']}",
                 "ts": datetime.now(UTC),
                 "cv": "shopify@0.1.0",
             },
@@ -70,7 +70,7 @@ async def _insert_raw_webhook(tenant_id: str, payload: dict) -> int:
                 "sid": str(payload["id"]),
                 "p": p_str,
                 "h": p_hash,
-                "u": f"webhook://shopify/{tenant_id}/orders/create/{payload['id']}",
+                "u": f"webhook://test.example.com/{tenant_id}/orders/create/{payload['id']}",
                 "ts": datetime.now(UTC),
                 "cv": "shopify@webhook@0.1.0",
             },
@@ -83,29 +83,27 @@ async def _insert_raw_webhook(tenant_id: str, payload: dict) -> int:
 @pytest.fixture(autouse=True)
 async def _cleanup():
     yield
-    # tests use unique tenant_ids per run, but clean up any old test rows
+    # Scope cleanup strictly to test-only URL prefixes so we don't wipe
+    # demo data created by `make demo` (which uses the m000.myshopify.com
+    # shop_domain). Each test uses a fresh-UUID tenant_id, so rows from
+    # different runs don't collide.
     async with SessionLocal() as s:
         await s.execute(
             text(
                 'DELETE FROM core."order" '
-                "WHERE source_record_url LIKE 'https://m000.myshopify.com/admin/orders/%' "
-                "AND ingested_at < now() - interval '5 minutes'"
+                "WHERE source_record_url LIKE 'https://test.example.com/%'"
             )
         )
         await s.execute(
-            text("DELETE FROM raw.shopify_orders WHERE ingested_at < now() - interval '5 minutes'")
+            text(
+                "DELETE FROM raw.shopify_orders "
+                "WHERE source_record_url LIKE 'https://test.example.com/%'"
+            )
         )
         await s.execute(
             text(
                 "DELETE FROM raw.shopify_webhook_inbox "
-                "WHERE ingested_at < now() - interval '5 minutes'"
-            )
-        )
-        await s.execute(
-            text(
-                "DELETE FROM core.agent_runs "
-                "WHERE agent_id = 'rto_risk_flagger' "
-                "AND triggered_at < now() - interval '5 minutes'"
+                "WHERE source_record_url LIKE 'webhook://test.example.com/%'"
             )
         )
         await s.commit()
