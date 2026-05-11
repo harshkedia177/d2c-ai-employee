@@ -16,6 +16,7 @@ import asyncio
 import time
 from typing import ClassVar
 
+import redis as _redis_sync  # synchronous client; separate from redis.asyncio
 import redis.asyncio as redis
 
 # Atomic acquire script.
@@ -58,6 +59,11 @@ class TokenBucket:
         capacity: int,
     ):
         self.r = redis.from_url(redis_url, decode_responses=True)
+        # Sync client for code paths that aren't inside an event loop
+        # (e.g. connectors making httpx.get calls). Both clients hit the
+        # same Redis hash, so sync and async callers correctly compete for
+        # tokens in the same bucket.
+        self.r_sync = _redis_sync.from_url(redis_url, decode_responses=True)
         self.key = key
         self.refill = refill_per_sec
         self.capacity = capacity
@@ -69,6 +75,27 @@ class TokenBucket:
         tenant_id: str,
         source: str,
     ) -> TokenBucket:
+        if source not in DEFAULT_RATES:
+            raise ValueError(f"no default rate for source={source}")
+        refill, capacity = DEFAULT_RATES[source]
+        return cls(
+            redis_url=redis_url,
+            key=f"bucket:{tenant_id}:{source}",
+            refill_per_sec=refill,
+            capacity=capacity,
+        )
+
+    @classmethod
+    def for_source_sync(
+        cls,
+        redis_url: str,
+        tenant_id: str,
+        source: str,
+    ) -> TokenBucket:
+        """Same as ``for_source`` but does not need to be awaited.
+
+        Use this from sync code paths (e.g. connectors making httpx calls).
+        """
         if source not in DEFAULT_RATES:
             raise ValueError(f"no default rate for source={source}")
         refill, capacity = DEFAULT_RATES[source]
@@ -102,6 +129,33 @@ class TokenBucket:
             if wait == 0:
                 return
             await asyncio.sleep(min(wait, 5.0))
+
+    def acquire_sync(self, max_wait_s: float = 30.0) -> None:
+        """Synchronous acquire. Blocks the calling thread until a token is
+        available or ``max_wait_s`` elapses.
+
+        Used by sync code paths (connectors' httpx.get calls). The async
+        ``acquire()`` above is for async callers. Both paths share the Lua
+        script via Redis' SHA1 cache; tokens come from the same Redis hash
+        so sync and async callers correctly compete for the same bucket.
+        """
+        sha = self.r_sync.script_load(LUA)  # idempotent; Redis dedupes by SHA1
+        deadline = time.time() + max_wait_s
+        while True:
+            wait_raw = self.r_sync.evalsha(
+                sha,
+                1,
+                self.key,
+                str(self.capacity),
+                str(self.refill),
+                str(time.time()),
+            )
+            wait = float(wait_raw) if isinstance(wait_raw, str) else float(wait_raw)
+            if wait == 0:
+                return
+            if time.time() + wait > deadline:
+                raise TimeoutError(f"acquire_sync on {self.key} timed out after {max_wait_s:.1f}s")
+            time.sleep(min(wait, 5.0))
 
     async def reset(self) -> None:
         """Drop the bucket state (test helper)."""

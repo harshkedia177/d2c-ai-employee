@@ -58,6 +58,14 @@ class CheckResult:
 
 @runtime_checkable
 class Connector(Protocol):
+    """A connector pulls Records from a source SaaS API.
+
+    If ``config["rate_limiter"]`` is set, it must be a ``TokenBucket``-shaped
+    object exposing an ``acquire_sync()`` method. Connectors should call it
+    before each outbound HTTP request so rate limits are enforced at the
+    network layer, not just at the record-yielding layer.
+    """
+
     source_system: str
     connector_version: str
 

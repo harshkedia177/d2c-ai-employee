@@ -27,6 +27,7 @@ class ShiprocketConnector:
 
     def check(self, config: dict[str, Any]) -> CheckResult:
         try:
+            # _token() handles rate limiting via config["rate_limiter"]
             self._token(config)
             return CheckResult(ok=True)
         except Exception as e:
@@ -47,6 +48,9 @@ class ShiprocketConnector:
         cached = self._token_cache.get(key)
         if cached and cached[1] > time.time() + 60:
             return cached[0]
+        rl = config.get("rate_limiter")
+        if rl is not None:
+            rl.acquire_sync()
         r = httpx.post(
             f"{config['base_url']}/v1/external/auth/login",
             json={"email": config["email"], "password": config["password"]},
@@ -73,6 +77,9 @@ class ShiprocketConnector:
         last_shipped = (state or {}).get("shipped_date") or ""
 
         while True:
+            rl = config.get("rate_limiter")
+            if rl is not None:
+                rl.acquire_sync()
             r = httpx.get(
                 f"{config['base_url']}/v1/external/orders",
                 params={

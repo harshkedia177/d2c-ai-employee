@@ -119,3 +119,39 @@ async def test_for_source_uses_default_rates():
 async def test_for_source_rejects_unknown_source():
     with pytest.raises(ValueError):
         await TokenBucket.for_source(REDIS_URL, "t-test", "tiktok_ads")
+
+
+def test_acquire_sync_blocks_until_tokens_refill():
+    """3 sync acquires on a capacity=2, refill=1/s bucket: 2 immediate, 3rd waits ~1s."""
+    key = f"test-sync:{uuid.uuid4().hex}:shiprocket"
+    b = TokenBucket(
+        redis_url=REDIS_URL,
+        key=key,
+        refill_per_sec=1.0,
+        capacity=2,
+    )
+    try:
+        b.acquire_sync()
+        b.acquire_sync()
+        start = time.time()
+        b.acquire_sync()
+        elapsed = time.time() - start
+        assert 0.7 < elapsed < 2.0, f"expected ~1s wait, got {elapsed:.2f}s"
+    finally:
+        b.r_sync.delete(key)
+
+
+def test_acquire_sync_times_out_if_max_wait_exceeded():
+    key = f"test-sync-timeout:{uuid.uuid4().hex}:shiprocket"
+    b = TokenBucket(
+        redis_url=REDIS_URL,
+        key=key,
+        refill_per_sec=0.1,
+        capacity=1,
+    )
+    try:
+        b.acquire_sync()
+        with pytest.raises(TimeoutError):
+            b.acquire_sync(max_wait_s=2.0)
+    finally:
+        b.r_sync.delete(key)

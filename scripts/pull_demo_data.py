@@ -162,18 +162,18 @@ async def _drain_one_connector(
 
     Note: connector.read may yield Records of MULTIPLE streams (Shopify emits
     line_items inline with orders). Route each by record.stream, not by the
-    stream argument passed to read()."""
-    bucket = await TokenBucket.for_source(
-        redis_url=settings.redis_url,
-        tenant_id=tenant_id,
-        source=connector.source_system,
-    )
+    stream argument passed to read().
+
+    Rate limiting is now handled inside the connector via
+    ``config["rate_limiter"].acquire_sync()`` before each httpx call — that's
+    the right place to gate, since at 10k merchants Shiprocket 429s on the
+    HTTP layer, not on the record-yielding loop.
+    """
     state = await _load_state(tenant_id, connector.source_system, stream)
 
     records_written = 0
     checkpoints = 0
     for item in connector.read(stream, config, state):
-        await bucket.acquire()
         if isinstance(item, Record):
             key = (connector.source_system, item.stream)
             raw_table = RAW_TABLES.get(key)
@@ -225,6 +225,24 @@ async def main_async(tenant_id: str, reset: bool) -> None:
         "ad_account": MERCHANT,
         "access_token": "mock-meta-token",
     }
+
+    # Attach a per-source token bucket so connectors can rate-limit their
+    # own outbound httpx calls.
+    shopify_cfg["rate_limiter"] = TokenBucket.for_source_sync(
+        redis_url=settings.redis_url,
+        tenant_id=tenant_id,
+        source="shopify",
+    )
+    shiprocket_cfg["rate_limiter"] = TokenBucket.for_source_sync(
+        redis_url=settings.redis_url,
+        tenant_id=tenant_id,
+        source="shiprocket",
+    )
+    meta_cfg["rate_limiter"] = TokenBucket.for_source_sync(
+        redis_url=settings.redis_url,
+        tenant_id=tenant_id,
+        source="meta_ads",
+    )
 
     # Pull in dependency order so cross-source joins resolve cleanly.
     # 1) Shopify orders (emits orders + line_items records)
