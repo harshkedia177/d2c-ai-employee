@@ -63,6 +63,10 @@ def gen_orders(merchant_id: str, n: int = 1000) -> list[dict]:
                 "note_attributes": [{"name": "utm_campaign", "value": utm}],
             }
         )
+    # Sort by updated_at so cursor-paginating connectors (updated_at_min) see
+    # the full volume; otherwise each page's max-cursor advances past
+    # later rows still on disk and the connector skips them.
+    out.sort(key=lambda o: o["updated_at"])
     return out
 
 
@@ -90,6 +94,9 @@ def gen_shipments(orders: list[dict]) -> list[dict]:
                 "delivered_date": (shipped + timedelta(days=random.randint(2, 6))).isoformat(),
             }
         )
+    # Sort by shipped_date so the Shiprocket connector's date cursor walks
+    # the whole list rather than skipping ahead.
+    out.sort(key=lambda s: s["shipped_date"])
     return out
 
 
@@ -128,6 +135,9 @@ def gen_meta(merchant_id: str, n_campaigns: int = 10) -> tuple[list[dict], list[
                     ],
                 }
             )
+    # Sort by (date_start, campaign_id) so the Meta connector's date_start
+    # cursor sees the whole volume.
+    insights.sort(key=lambda r: (r["date_start"], r["campaign_id"]))
     return campaigns, insights
 
 
