@@ -1,4 +1,4 @@
-.PHONY: install up down test fmt seed migrate
+.PHONY: install up down test fmt seed migrate demo
 
 install:
 	uv sync
@@ -21,3 +21,6 @@ test:
 fmt:
 	uv run ruff check --fix .
 	uv run ruff format .
+
+demo:
+	uv run python scripts/run_demo.py
