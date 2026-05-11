@@ -14,10 +14,14 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
-import redis as _redis_sync  # synchronous client; separate from redis.asyncio
-import redis.asyncio as redis
+import redis as _redis_pkg  # synchronous client
+import redis.asyncio as _redis_asyncio  # async client (separate connection pool)
+
+if TYPE_CHECKING:
+    from redis import Redis as _SyncRedis
+    from redis.asyncio import Redis as _AsyncRedis
 
 # Atomic acquire script.
 # Returns 0 if a token was acquired (call may proceed),
@@ -58,12 +62,13 @@ class TokenBucket:
         refill_per_sec: float,
         capacity: int,
     ):
-        self.r = redis.from_url(redis_url, decode_responses=True)
+        # Async client for asyncio code paths (worker, tests, FastAPI handlers).
+        self.r: _AsyncRedis = _redis_asyncio.from_url(redis_url, decode_responses=True)
         # Sync client for code paths that aren't inside an event loop
         # (e.g. connectors making httpx.get calls). Both clients hit the
         # same Redis hash, so sync and async callers correctly compete for
         # tokens in the same bucket.
-        self.r_sync = _redis_sync.from_url(redis_url, decode_responses=True)
+        self.r_sync: _SyncRedis = _redis_pkg.from_url(redis_url, decode_responses=True)
         self.key = key
         self.refill = refill_per_sec
         self.capacity = capacity
@@ -109,7 +114,8 @@ class TokenBucket:
     async def _ensure_script(self) -> str:
         sha = self._scripts.get(LUA)
         if sha is None:
-            sha = await self.r.script_load(LUA)
+            loaded = await self.r.script_load(LUA)
+            sha = cast("str", loaded)
             self._scripts[LUA] = sha
         return sha
 
@@ -125,7 +131,7 @@ class TokenBucket:
                 str(self.refill),
                 str(time.time()),
             )
-            wait = float(wait_raw) if isinstance(wait_raw, str) else float(wait_raw)
+            wait = float(cast("str", wait_raw))
             if wait == 0:
                 return
             await asyncio.sleep(min(wait, 5.0))
@@ -139,7 +145,7 @@ class TokenBucket:
         script via Redis' SHA1 cache; tokens come from the same Redis hash
         so sync and async callers correctly compete for the same bucket.
         """
-        sha = self.r_sync.script_load(LUA)  # idempotent; Redis dedupes by SHA1
+        sha = cast("str", self.r_sync.script_load(LUA))  # idempotent; Redis dedupes by SHA1
         deadline = time.time() + max_wait_s
         while True:
             wait_raw = self.r_sync.evalsha(
@@ -150,7 +156,7 @@ class TokenBucket:
                 str(self.refill),
                 str(time.time()),
             )
-            wait = float(wait_raw) if isinstance(wait_raw, str) else float(wait_raw)
+            wait = float(cast("str", wait_raw))
             if wait == 0:
                 return
             if time.time() + wait > deadline:
