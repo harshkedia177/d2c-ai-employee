@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy import text
+
 from packages.agents.base import (
     AgentContext,
     Decision,
@@ -27,6 +29,8 @@ from packages.agents.base import (
     write_run_log,
 )
 from packages.chat.tools import compute_metric
+from packages.udm.xref import canonical_id
+from packages.warehouse.db import SessionLocal
 
 log = logging.getLogger(__name__)
 
@@ -298,15 +302,97 @@ class RTORiskFlagger:
     async def _customer_prior_rto(
         self, tenant_id: str, customer_id: Any
     ) -> tuple[float, int, list[dict]]:
-        # v0: simple — count prior orders this customer has, no RTO yet
-        # because mock_saas seed doesn't link customer_id → shipments cleanly.
-        # Use placeholder: 0 prior RTO, 0 orders seen → cold start.
+        """Real customer RTO history: count prior shipments for this customer
+        and what fraction were RTO.
+
+        customer_id is the source-system Shopify customer id. We map it to the
+        canonical_id via the same UUIDv5 derivation the normalizer uses, then
+        join shipments through orders.
+        """
         if not customer_id:
             return 0.0, 0, []
-        return 0.0, 0, []
+        customer_canonical = canonical_id(tenant_id, "customer", "shopify", str(customer_id))
+        async with SessionLocal() as s:
+            result = await s.execute(
+                text("""
+                  SELECT
+                    COUNT(*) AS n,
+                    SUM(CASE WHEN s.is_rto THEN 1 ELSE 0 END)::numeric
+                      / NULLIF(COUNT(*), 0) AS rate,
+                    ARRAY_AGG(jsonb_build_object(
+                      'source_system', s.source_system,
+                      'source_id', s.source_id,
+                      'url', s.source_record_url,
+                      'raw_table', s.raw_table,
+                      'raw_row_id', s.raw_row_id
+                    )) AS citations
+                  FROM core.shipment s
+                  JOIN core."order" o
+                    ON o.tenant_id = s.tenant_id
+                    AND o.canonical_id = s.order_canonical_id
+                  WHERE o.tenant_id = :t
+                    AND o.customer_canonical_id = :cc
+                """),
+                {"t": tenant_id, "cc": customer_canonical},
+            )
+            row = result.first()
+        if row is None or row.n == 0:
+            return 0.0, 0, []
+        rate = float(row.rate or 0)
+        n = int(row.n)
+        citations = list(row.citations or [])[:3]
+        return rate, n, citations
 
     async def _sku_rto_rate(
         self, tenant_id: str, sku_list: list[str | None]
     ) -> tuple[float, list[dict]]:
-        # v0: stub — 0 rate, 0 citations. The signal lives in pincode_rto_rate.
-        return 0.0, []
+        """Real SKU basket RTO rate: average RTO rate across the SKUs in this
+        order's basket, weighted by historical shipments containing each SKU.
+
+        Joins core.order_line → core.order → core.shipment to find the RTO
+        incidence of each SKU across all historical shipments. Returns the
+        arithmetic mean over the basket's SKUs (skipping SKUs with no history).
+        """
+        skus = [s for s in (sku_list or []) if s]
+        if not skus:
+            return 0.0, []
+        async with SessionLocal() as s:
+            result = await s.execute(
+                text("""
+                  SELECT
+                    ol.sku,
+                    COUNT(*) AS n,
+                    SUM(CASE WHEN sh.is_rto THEN 1 ELSE 0 END)::numeric
+                      / NULLIF(COUNT(*), 0) AS rate,
+                    (ARRAY_AGG(jsonb_build_object(
+                      'source_system', sh.source_system,
+                      'source_id', sh.source_id,
+                      'url', sh.source_record_url,
+                      'raw_table', sh.raw_table,
+                      'raw_row_id', sh.raw_row_id
+                    )))[1:2] AS citations
+                  FROM core.order_line ol
+                  JOIN core."order" o
+                    ON o.tenant_id = ol.tenant_id
+                    AND o.canonical_id = ol.order_canonical_id
+                  JOIN core.shipment sh
+                    ON sh.tenant_id = o.tenant_id
+                    AND sh.order_canonical_id = o.canonical_id
+                  WHERE ol.tenant_id = :t
+                    AND ol.sku = ANY(:skus)
+                  GROUP BY ol.sku
+                """),
+                {"t": tenant_id, "skus": skus},
+            )
+            rows = list(result.mappings())
+        if not rows:
+            return 0.0, []
+        # Arithmetic mean of per-SKU rates (skipping SKUs with no history).
+        valid = [r for r in rows if r["n"] and r["n"] > 0]
+        if not valid:
+            return 0.0, []
+        mean_rate = sum(float(r["rate"] or 0) for r in valid) / len(valid)
+        citations: list[dict] = []
+        for r in valid[:3]:
+            citations.extend(list(r["citations"] or []))
+        return mean_rate, citations[:3]

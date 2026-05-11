@@ -273,3 +273,175 @@ def test_agent_implements_protocol():
     assert callable(flagger.gather)
     assert callable(flagger.decide)
     assert callable(flagger.propose)
+
+
+@pytest.mark.asyncio
+async def test_customer_prior_rto_returns_real_rate_from_history():
+    """Insert 3 historical orders+shipments for a customer (2 RTO, 1 ok),
+    then call _customer_prior_rto. Must return rate=2/3 with 3 citations."""
+    from packages.udm.xref import canonical_id
+
+    tid = str(uuid.uuid4())
+    customer_src_id = f"cust-{uuid.uuid4().hex[:8]}"
+    customer_canonical = canonical_id(tid, "customer", "shopify", customer_src_id)
+
+    async with SessionLocal() as s:
+        for i, is_rto in enumerate([True, True, False]):
+            order_canonical = str(uuid.uuid4())
+            shipment_canonical = str(uuid.uuid4())
+            sid = f"o-{i}-{uuid.uuid4().hex[:6]}"
+            await s.execute(
+                text("""
+                  INSERT INTO core."order" (
+                    tenant_id, canonical_id, customer_canonical_id,
+                    placed_at, status, gateway, total, currency,
+                    source_system, source_id, source_record_url,
+                    raw_table, raw_row_id, raw_payload_hash,
+                    fetched_at, ingested_at, connector_version
+                  ) VALUES (
+                    :t, :oc, :cc, '2026-04-01T00:00:00Z', 'paid', 'razorpay',
+                    500, 'INR', 'shopify', :sid,
+                    'https://shop.example.com/orders/' || :sid,
+                    'raw.shopify_orders', 1, 'h',
+                    now(), now(), 'shopify@0.1.0'
+                  )
+                """),
+                {"t": tid, "oc": order_canonical, "cc": customer_canonical, "sid": sid},
+            )
+            await s.execute(
+                text("""
+                  INSERT INTO core.shipment (
+                    tenant_id, canonical_id, order_canonical_id, status, is_rto,
+                    source_system, source_id, source_record_url,
+                    raw_table, raw_row_id, raw_payload_hash,
+                    fetched_at, ingested_at, connector_version
+                  ) VALUES (
+                    :t, :sc, :oc, 'Delivered', :rto,
+                    'shiprocket', :sid,
+                    'https://app.shiprocket.in/orders/' || :sid,
+                    'raw.shiprocket_shipments', 1, 'h',
+                    now(), now(), 'shiprocket@0.1.0'
+                  )
+                """),
+                {
+                    "t": tid,
+                    "sc": shipment_canonical,
+                    "oc": order_canonical,
+                    "rto": is_rto,
+                    "sid": f"sh-{i}-{uuid.uuid4().hex[:6]}",
+                },
+            )
+        await s.commit()
+
+    flagger = RTORiskFlagger()
+    rate, n, citations = await flagger._customer_prior_rto(tid, customer_src_id)
+    assert n == 3
+    assert abs(rate - (2 / 3)) < 0.001
+    assert len(citations) == 3
+    assert all(c.get("source_system") == "shiprocket" for c in citations)
+
+
+@pytest.mark.asyncio
+async def test_customer_prior_rto_cold_start_returns_zero():
+    """No history → return (0.0, 0, [])."""
+    flagger = RTORiskFlagger()
+    rate, n, citations = await flagger._customer_prior_rto(str(uuid.uuid4()), "cust-nonexistent")
+    assert (rate, n, citations) == (0.0, 0, [])
+
+
+@pytest.mark.asyncio
+async def test_sku_rto_rate_averages_across_basket():
+    """Insert 2 SKUs with different RTO rates, then call _sku_rto_rate
+    with the basket [sku_a, sku_b]. Result should be the mean."""
+    tid = str(uuid.uuid4())
+    sku_a = f"SKU-A-{uuid.uuid4().hex[:6]}"
+    sku_b = f"SKU-B-{uuid.uuid4().hex[:6]}"
+
+    async with SessionLocal() as s:
+        # SKU A: 3 shipments, 2 RTO (rate 2/3)
+        # SKU B: 4 shipments, 1 RTO (rate 1/4)
+        for i, (sku, is_rto) in enumerate(
+            [
+                (sku_a, True),
+                (sku_a, True),
+                (sku_a, False),
+                (sku_b, True),
+                (sku_b, False),
+                (sku_b, False),
+                (sku_b, False),
+            ]
+        ):
+            order_canonical = str(uuid.uuid4())
+            shipment_canonical = str(uuid.uuid4())
+            sid = f"sku-test-{i}-{uuid.uuid4().hex[:6]}"
+            await s.execute(
+                text("""
+                  INSERT INTO core."order" (
+                    tenant_id, canonical_id, placed_at, status, gateway,
+                    total, currency,
+                    source_system, source_id, source_record_url,
+                    raw_table, raw_row_id, raw_payload_hash,
+                    fetched_at, ingested_at, connector_version
+                  ) VALUES (
+                    :t, :oc, '2026-04-01T00:00:00Z', 'paid', 'razorpay',
+                    500, 'INR', 'shopify', :sid,
+                    'https://shop/orders/' || :sid,
+                    'raw.shopify_orders', 1, 'h',
+                    now(), now(), 'shopify@0.1.0'
+                  )
+                """),
+                {"t": tid, "oc": order_canonical, "sid": sid},
+            )
+            await s.execute(
+                text("""
+                  INSERT INTO core.order_line (
+                    tenant_id, order_canonical_id, line_id, sku, qty, unit_price,
+                    source_system, source_id, source_record_url,
+                    raw_table, raw_row_id, raw_payload_hash,
+                    fetched_at, ingested_at, connector_version
+                  ) VALUES (
+                    :t, :oc, :lid, :sku, 1, 500,
+                    'shopify', :sid || '-li',
+                    'https://shop/orders/' || :sid,
+                    'raw.shopify_line_items', 1, 'h',
+                    now(), now(), 'shopify@0.1.0'
+                  )
+                """),
+                {
+                    "t": tid,
+                    "oc": order_canonical,
+                    "lid": f"li-{i}",
+                    "sku": sku,
+                    "sid": sid,
+                },
+            )
+            await s.execute(
+                text("""
+                  INSERT INTO core.shipment (
+                    tenant_id, canonical_id, order_canonical_id, status, is_rto,
+                    source_system, source_id, source_record_url,
+                    raw_table, raw_row_id, raw_payload_hash,
+                    fetched_at, ingested_at, connector_version
+                  ) VALUES (
+                    :t, :sc, :oc, 'Delivered', :rto,
+                    'shiprocket', :sid,
+                    'https://shiprocket/' || :sid,
+                    'raw.shiprocket_shipments', 1, 'h',
+                    now(), now(), 'shiprocket@0.1.0'
+                  )
+                """),
+                {
+                    "t": tid,
+                    "sc": shipment_canonical,
+                    "oc": order_canonical,
+                    "rto": is_rto,
+                    "sid": sid + "-sh",
+                },
+            )
+        await s.commit()
+
+    flagger = RTORiskFlagger()
+    rate, citations = await flagger._sku_rto_rate(tid, [sku_a, sku_b])
+    expected = (2 / 3 + 1 / 4) / 2  # ≈ 0.458
+    assert abs(rate - expected) < 0.01, f"got {rate}, expected ~{expected}"
+    assert len(citations) >= 1
