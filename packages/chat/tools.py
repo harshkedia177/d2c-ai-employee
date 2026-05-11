@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 from datetime import date, datetime
 from typing import Any
 
@@ -23,8 +24,32 @@ from packages.semantic_layer.compiler import (
 )
 from packages.warehouse.db import SessionLocal
 
+log = logging.getLogger(__name__)
+
 # In-memory query_hash → CompiledQuery store, used by get_provenance.
 _QUERY_CACHE: dict[str, dict[str, Any]] = {}
+
+# Lazy embeddings client. Tests can monkeypatch _get_embeddings_client.
+_embeddings_client: Any | None = None
+
+
+def _get_embeddings_client() -> Any | None:
+    """Return a GeminiEmbeddings if GEMINI_API_KEY is set, else None.
+
+    Tests can monkeypatch this to inject FakeEmbeddings for deterministic
+    halfvec NN search without touching the network.
+    """
+    global _embeddings_client
+    if _embeddings_client is not None:
+        return _embeddings_client
+    from packages.config import settings
+
+    if not settings.gemini_api_key:
+        return None
+    from packages.llm.embeddings import GeminiEmbeddings
+
+    _embeddings_client = GeminiEmbeddings()
+    return _embeddings_client
 
 
 def _coerce_date_filter(filters: dict[str, Any]) -> dict[str, Any]:
@@ -77,25 +102,64 @@ async def get_schema(tenant_id: str, entity: str | None = None) -> dict[str, Any
 
 
 async def search_examples(tenant_id: str, question: str, k: int = 5) -> dict[str, Any]:
-    """Return the top-k curated (question, plan) pairs for few-shot context.
+    """Find curated (question, plan) examples similar to a question.
 
-    For v0: a simple in-process examples loader (no embeddings yet — Task
-    24 will wire the halfvec HNSW path). Returns the canned list ordered
-    by naive substring overlap.
+    Primary path: embed the query via gemini-embedding-001 and run a
+    halfvec cosine NN against core.few_shot_examples (HNSW index).
+
+    Fallback (no API key OR table empty): naive substring overlap on
+    packages/semantic_layer/examples.json. Logged but does not error.
     """
+    client = _get_embeddings_client()
+    if client is not None:
+        try:
+            q_vec = await client.embed(question)
+            q_literal = "[" + ",".join(f"{v:.6f}" for v in q_vec) + "]"
+            async with SessionLocal() as s:
+                result = await s.execute(
+                    text("""
+                      SELECT question, plan, source_record_url,
+                             (embedding <=> CAST(:q AS halfvec)) AS distance
+                      FROM core.few_shot_examples
+                      WHERE embedding_version = 'v1'
+                      ORDER BY embedding <=> CAST(:q AS halfvec)
+                      LIMIT :k
+                    """),
+                    {"q": q_literal, "k": k},
+                )
+                rows = list(result.mappings())
+            if rows:
+                return {
+                    "examples": [
+                        {
+                            "question": r["question"],
+                            "plan": r["plan"],
+                            "distance": (
+                                float(r["distance"]) if r["distance"] is not None else None
+                            ),
+                            "source_record_url": r["source_record_url"],
+                        }
+                        for r in rows
+                    ],
+                    "retrieval": "halfvec_cosine_nn",
+                }
+            # Table empty → fallback
+            log.info("few_shot_examples is empty; falling back to substring search")
+        except Exception as e:
+            log.warning("embedding-based search failed: %s; falling back", e)
+
+    # Fallback: substring overlap (the original implementation)
     from pathlib import Path
 
     examples_path = Path(__file__).parent.parent / "semantic_layer" / "examples.json"
     examples = json.loads(examples_path.read_text())
-
-    # Naive scoring: count overlap of lowercased word tokens.
     qtokens = set(question.lower().split())
 
     def score(ex: dict) -> int:
         return len(qtokens & set(ex["question"].lower().split()))
 
     ranked = sorted(examples, key=score, reverse=True)[:k]
-    return {"examples": ranked}
+    return {"examples": ranked, "retrieval": "substring_fallback"}
 
 
 # ---------- Tool 3: compute_metric (THE chokepoint) ----------

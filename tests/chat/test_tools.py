@@ -198,6 +198,116 @@ async def test_propose_write_rejects_unknown_action():
     assert "error" in out
 
 
+@pytest.mark.asyncio
+async def test_search_examples_falls_back_to_substring_when_no_embeddings():
+    """No embeddings client → substring overlap fallback, retrieval flag set."""
+    from packages.chat import tools as tools_mod
+
+    # Force the lazy client to None and override the getter (in case
+    # GEMINI_API_KEY is set in the env, we still want to test the fallback).
+    tools_mod._embeddings_client = None
+    orig = tools_mod._get_embeddings_client
+    tools_mod._get_embeddings_client = lambda: None
+    try:
+        out = await search_examples(tenant_id="t1", question="what's my GMV last 30 days")
+        assert out["examples"]
+        assert out.get("retrieval") == "substring_fallback"
+    finally:
+        tools_mod._get_embeddings_client = orig
+        tools_mod._embeddings_client = None
+
+
+@pytest.mark.asyncio
+async def test_search_examples_uses_halfvec_when_examples_indexed(monkeypatch):
+    """Seed core.few_shot_examples with deterministic FakeEmbeddings vectors,
+    then call search_examples — must use halfvec NN, not substring."""
+    import json
+    from datetime import UTC, datetime
+
+    from packages.chat import tools as tools_mod
+    from packages.llm.embeddings import FakeEmbeddings
+
+    fake = FakeEmbeddings()
+    monkeypatch.setattr(tools_mod, "_get_embeddings_client", lambda: fake)
+
+    seeded_qs = [
+        (
+            "How is my GMV last 30 days?",
+            [{"tool": "compute_metric", "args": {"metric_id": "gmv"}}],
+        ),
+        (
+            "Which pincodes have RTO issues?",
+            [
+                {
+                    "tool": "compute_metric",
+                    "args": {
+                        "metric_id": "pincode_rto_rate_90d",
+                        "dimensions": ["pincode"],
+                    },
+                }
+            ],
+        ),
+        (
+            "Show campaigns by ROAS",
+            [
+                {
+                    "tool": "compute_metric",
+                    "args": {
+                        "metric_id": "post_rto_roas",
+                        "dimensions": ["campaign"],
+                    },
+                }
+            ],
+        ),
+    ]
+
+    def _fmt(v: list[float]) -> str:
+        return "[" + ",".join(f"{x:.6f}" for x in v) + "]"
+
+    # Clean any prior test rows, then seed fresh under embedding_version='v1'.
+    async with SessionLocal() as cs:
+        await cs.execute(
+            text("DELETE FROM core.few_shot_examples WHERE source_record_url LIKE 'test://%'")
+        )
+        await cs.commit()
+    try:
+        async with SessionLocal() as s:
+            for q, plan in seeded_qs:
+                vec = await fake.embed(q)
+                await s.execute(
+                    text("""
+                      INSERT INTO core.few_shot_examples (
+                        tenant_id, question, plan, embedding,
+                        source_record_url, fetched_at, embedding_model, embedding_version
+                      ) VALUES (
+                        NULL, :q, CAST(:p AS jsonb), CAST(:e AS halfvec),
+                        :url, :ts, 'fake', 'v1'
+                      )
+                    """),
+                    {
+                        "q": q,
+                        "p": json.dumps(plan),
+                        "e": _fmt(vec),
+                        "url": "test://" + q[:20],
+                        "ts": datetime.now(UTC),
+                    },
+                )
+            await s.commit()
+
+        out = await search_examples(tenant_id="t1", question="How is my GMV last 30 days?")
+        assert out.get("retrieval") == "halfvec_cosine_nn"
+        assert len(out["examples"]) >= 1
+        # Top result must be the exact match (same FakeEmbeddings vector → cosine 0).
+        assert out["examples"][0]["question"] == "How is my GMV last 30 days?"
+    finally:
+        async with SessionLocal() as cs:
+            await cs.execute(
+                text("DELETE FROM core.few_shot_examples WHERE source_record_url LIKE 'test://%'")
+            )
+            await cs.commit()
+        tools_mod._embeddings_client = None
+
+
 def test_tool_registry_has_seven_tools():
     assert len(TOOL_REGISTRY) == 7
     assert len(TOOL_SCHEMAS) == 7
