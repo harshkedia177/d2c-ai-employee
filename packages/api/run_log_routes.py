@@ -46,6 +46,17 @@ async def list_runs(
     return {"runs": rows}
 
 
+@router.get("/metrics")
+async def list_all_metrics() -> dict[str, Any]:
+    """Return the semantic layer's metrics + dimensions for the /metrics UI page."""
+    from packages.semantic_layer.compiler import list_dimensions, list_metrics
+
+    return {
+        "metrics": list_metrics(),
+        "dimensions": list_dimensions(),
+    }
+
+
 @router.get("/tenants")
 async def list_tenants() -> dict[str, Any]:
     async with SessionLocal() as s:

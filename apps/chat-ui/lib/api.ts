@@ -80,4 +80,22 @@ export async function fetchRuns(
   return data.runs;
 }
 
+export type MetricDef = {
+  id: string;
+  description: string;
+  grain: string;
+  min_sample_size?: number;
+};
+
+export type DimensionDef = { id: string; sql: string };
+
+export async function fetchMetrics(): Promise<{
+  metrics: MetricDef[];
+  dimensions: DimensionDef[];
+}> {
+  return getJSON<{ metrics: MetricDef[]; dimensions: DimensionDef[] }>(
+    "/metrics",
+  );
+}
+
 export const DEFAULT_TENANT_ID = "00000000-0000-0000-0000-000000000001";
