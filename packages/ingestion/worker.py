@@ -36,8 +36,11 @@ from packages.udm.normalize.meta_to_udm import (
 )
 from packages.udm.normalize.shiprocket_to_udm import shipment_from_shiprocket
 from packages.udm.normalize.shopify_to_udm import (
+    customer_from_shopify,
     order_from_shopify,
     order_line_from_shopify,
+    product_from_shopify,
+    refund_from_shopify,
 )
 from packages.warehouse.db import SessionLocal
 
@@ -47,6 +50,9 @@ log = logging.getLogger(__name__)
 NORMALIZER_DISPATCH: dict[tuple[str, str], tuple[Any, str]] = {
     ("shopify", "orders"): (order_from_shopify, "order"),
     ("shopify", "line_items"): (order_line_from_shopify, "order_line"),
+    ("shopify", "customers"): (customer_from_shopify, "customer"),
+    ("shopify", "products"): (product_from_shopify, "product"),
+    ("shopify", "refunds"): (refund_from_shopify, "refund"),
     ("shiprocket", "shipments"): (shipment_from_shiprocket, "shipment"),
     ("meta_ads", "campaigns"): (campaign_from_meta, "campaign"),
     ("meta_ads", "ad_insights"): (ad_spend_daily_from_meta, "ad_spend_daily"),
@@ -130,6 +136,45 @@ _CORE_INSERTS: dict[str, str] = {
         :fetched_at, :ingested_at, :connector_version
       ) ON CONFLICT (tenant_id, date, campaign_canonical_id, ad_id) DO NOTHING
     """,
+    "customer": """
+      INSERT INTO core.customer (
+        tenant_id, canonical_id, email_hash, phone_hash, country, created_at,
+        source_system, source_id, source_record_url,
+        raw_table, raw_row_id, raw_payload_hash,
+        fetched_at, ingested_at, connector_version
+      ) VALUES (
+        :tenant_id, :canonical_id, :email_hash, :phone_hash, :country, :created_at,
+        :source_system, :source_id, :source_record_url,
+        :raw_table, :raw_row_id, :raw_payload_hash,
+        :fetched_at, :ingested_at, :connector_version
+      ) ON CONFLICT (tenant_id, canonical_id, source_system) DO NOTHING
+    """,
+    "product": """
+      INSERT INTO core.product (
+        tenant_id, canonical_id, sku, title, price, currency, cost_per_item, vendor,
+        source_system, source_id, source_record_url,
+        raw_table, raw_row_id, raw_payload_hash,
+        fetched_at, ingested_at, connector_version
+      ) VALUES (
+        :tenant_id, :canonical_id, :sku, :title, :price, :currency, :cost_per_item, :vendor,
+        :source_system, :source_id, :source_record_url,
+        :raw_table, :raw_row_id, :raw_payload_hash,
+        :fetched_at, :ingested_at, :connector_version
+      ) ON CONFLICT (tenant_id, canonical_id, source_system) DO NOTHING
+    """,
+    "refund": """
+      INSERT INTO core.refund (
+        tenant_id, canonical_id, order_canonical_id, amount, reason, refunded_at,
+        source_system, source_id, source_record_url,
+        raw_table, raw_row_id, raw_payload_hash,
+        fetched_at, ingested_at, connector_version
+      ) VALUES (
+        :tenant_id, :canonical_id, :order_canonical_id, :amount, :reason, :refunded_at,
+        :source_system, :source_id, :source_record_url,
+        :raw_table, :raw_row_id, :raw_payload_hash,
+        :fetched_at, :ingested_at, :connector_version
+      ) ON CONFLICT (tenant_id, canonical_id) DO NOTHING
+    """,
 }
 
 
@@ -142,6 +187,9 @@ _TIMESTAMP_FIELDS: dict[str, tuple[str, ...]] = {
     "shipment": ("shipped_at", "delivered_at", "rto_at"),
     "campaign": (),
     "ad_spend_daily": (),
+    "customer": ("created_at",),
+    "product": (),
+    "refund": ("refunded_at",),
 }
 
 

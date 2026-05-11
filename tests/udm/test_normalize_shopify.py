@@ -5,6 +5,8 @@ from packages.udm.normalize.shopify_to_udm import (
     customer_from_shopify,
     order_from_shopify,
     order_line_from_shopify,
+    product_from_shopify,
+    refund_from_shopify,
 )
 
 
@@ -120,3 +122,50 @@ def test_customer_email_phone_hashed_not_plaintext():
     assert len(row["email_hash"]) == 64  # sha256
     assert len(row["phone_hash"]) == 64
     assert row["country"] == "IN"
+
+
+def test_product_normalizes_with_sku_canonical_id():
+    rec = Record(
+        stream="products",
+        primary_key="SKU-7",
+        payload={"sku": "SKU-7", "title": "Cool Tee", "price": "499.00", "currency": "INR"},
+        source_record_url="https://m000.myshopify.com/admin/products?sku=SKU-7",
+        fetched_at=datetime(2026, 5, 1, tzinfo=UTC),
+    )
+    row = product_from_shopify(rec, tenant_id="t1", raw_row_id=5)
+    from packages.udm.xref import canonical_id
+
+    assert row["canonical_id"] == canonical_id("t1", "product", "shopify", "SKU-7")
+    assert row["sku"] == "SKU-7"
+    assert row["title"] == "Cool Tee"
+    assert row["price"] == 499.00
+    assert row["currency"] == "INR"
+    assert row["raw_table"] == "raw.shopify_products"
+    assert row["source_system"] == "shopify"
+    assert row["raw_payload_hash"] == rec.payload_hash
+
+
+def test_refund_normalizes_with_order_canonical_id():
+    rec = Record(
+        stream="refunds",
+        primary_key="refund-12-1",
+        payload={
+            "id": "refund-12-1",
+            "amount": "250.00",
+            "reason": "damaged",
+            "created_at": "2026-05-03T10:00:00Z",
+            "_order_id": 12345,
+        },
+        source_record_url="https://m000.myshopify.com/admin/orders/12345#refund-refund-12-1",
+        fetched_at=datetime(2026, 5, 3, tzinfo=UTC),
+    )
+    row = refund_from_shopify(rec, tenant_id="t1", raw_row_id=11)
+    from packages.udm.xref import canonical_id
+
+    assert row["canonical_id"] == canonical_id("t1", "refund", "shopify", "refund-12-1")
+    assert row["order_canonical_id"] == canonical_id("t1", "order", "shopify", "12345")
+    assert row["amount"] == 250.00
+    assert row["reason"] == "damaged"
+    assert row["refunded_at"] == "2026-05-03T10:00:00Z"
+    assert row["raw_table"] == "raw.shopify_refunds"
+    assert row["raw_payload_hash"] == rec.payload_hash

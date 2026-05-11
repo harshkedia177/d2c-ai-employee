@@ -25,6 +25,23 @@ def gen_orders(merchant_id: str, n: int = 1000) -> list[dict]:
         pincode = random.choice(PINCODES_HIGH_RTO + PINCODES_LOW_RTO)
         cart_value = round(random.uniform(499, 4999), 2)
         utm = f"camp-{random.randint(1, 10)}"
+        # ~5% of orders get a partial refund 1–14 days after placement
+        if random.random() < 0.05:
+            refund_amount = round(cart_value * random.uniform(0.05, 0.30), 2)
+            refunded_at = placed_at + timedelta(days=random.randint(1, 14))
+            refunds = [
+                {
+                    "id": f"refund-{i}-1",
+                    "amount": str(refund_amount),
+                    "currency": "INR",
+                    "reason": random.choice(
+                        ["damaged", "wrong size", "customer changed mind", "quality issue"]
+                    ),
+                    "created_at": refunded_at.isoformat(),
+                }
+            ]
+        else:
+            refunds = []
         out.append(
             {
                 "id": f"shopify-{merchant_id}-{i:06d}",
@@ -61,6 +78,7 @@ def gen_orders(merchant_id: str, n: int = 1000) -> list[dict]:
                     for j in range(random.randint(1, 3))
                 ],
                 "note_attributes": [{"name": "utm_campaign", "value": utm}],
+                "refunds": refunds,
             }
         )
     # Sort by updated_at so cursor-paginating connectors (updated_at_min) see

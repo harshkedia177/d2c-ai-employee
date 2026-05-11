@@ -101,6 +101,11 @@ async def _print_summary(tenant_id: str) -> None:
         "raw.shopify_line_items": (
             "SELECT COUNT(*) FROM raw.shopify_line_items WHERE tenant_id = :t"
         ),
+        "raw.shopify_customers": (
+            "SELECT COUNT(*) FROM raw.shopify_customers WHERE tenant_id = :t"
+        ),
+        "raw.shopify_products": ("SELECT COUNT(*) FROM raw.shopify_products WHERE tenant_id = :t"),
+        "raw.shopify_refunds": "SELECT COUNT(*) FROM raw.shopify_refunds WHERE tenant_id = :t",
         "raw.shiprocket_shipments": (
             "SELECT COUNT(*) FROM raw.shiprocket_shipments WHERE tenant_id = :t"
         ),
@@ -108,6 +113,9 @@ async def _print_summary(tenant_id: str) -> None:
         "raw.meta_ad_insights": "SELECT COUNT(*) FROM raw.meta_ad_insights WHERE tenant_id = :t",
         "core.order": 'SELECT COUNT(*) FROM core."order" WHERE tenant_id = :t',
         "core.order_line": "SELECT COUNT(*) FROM core.order_line WHERE tenant_id = :t",
+        "core.customer": "SELECT COUNT(*) FROM core.customer WHERE tenant_id = :t",
+        "core.product": "SELECT COUNT(*) FROM core.product WHERE tenant_id = :t",
+        "core.refund": "SELECT COUNT(*) FROM core.refund WHERE tenant_id = :t",
         "core.shipment": "SELECT COUNT(*) FROM core.shipment WHERE tenant_id = :t",
         "core.campaign": "SELECT COUNT(*) FROM core.campaign WHERE tenant_id = :t",
         "core.ad_spend_daily": "SELECT COUNT(*) FROM core.ad_spend_daily WHERE tenant_id = :t",

@@ -52,6 +52,35 @@ async def _insert_raw_shopify_order(tenant_id: str, payload: dict) -> int:
     return row_id
 
 
+async def _insert_raw_generic(table: str, tenant_id: str, source_id: str, payload: dict) -> int:
+    """Insert into any raw.* table that follows the standard provenance shape."""
+    p_str = json.dumps(payload)
+    p_hash = hashlib.sha256(p_str.encode()).hexdigest()
+    async with SessionLocal() as s:
+        result = await s.execute(
+            text(f"""
+              INSERT INTO {table} (
+                tenant_id, source_id, payload, payload_hash,
+                source_record_url, fetched_at, connector_version
+              ) VALUES (
+                :t, :sid, CAST(:p AS jsonb), :h, :u, :ts, :cv
+              ) RETURNING row_id
+            """),
+            {
+                "t": tenant_id,
+                "sid": source_id,
+                "p": p_str,
+                "h": p_hash,
+                "u": f"https://test.example.com/{table}/{source_id}",
+                "ts": datetime.now(UTC),
+                "cv": "shopify@0.1.0",
+            },
+        )
+        row_id = result.scalar_one()
+        await s.commit()
+    return row_id
+
+
 async def _insert_raw_webhook(tenant_id: str, payload: dict) -> int:
     p_str = json.dumps(payload)
     p_hash = hashlib.sha256(p_str.encode()).hexdigest()
@@ -88,18 +117,26 @@ async def _cleanup():
     # shop_domain). Each test uses a fresh-UUID tenant_id, so rows from
     # different runs don't collide.
     async with SessionLocal() as s:
-        await s.execute(
-            text(
-                'DELETE FROM core."order" '
-                "WHERE source_record_url LIKE 'https://test.example.com/%'"
+        # core.* rows produced by the test-only URL prefix
+        for tbl in [
+            'core."order"',
+            "core.customer",
+            "core.product",
+            "core.refund",
+        ]:
+            await s.execute(
+                text(f"DELETE FROM {tbl} WHERE source_record_url LIKE 'https://test.example.com/%'")
             )
-        )
-        await s.execute(
-            text(
-                "DELETE FROM raw.shopify_orders "
-                "WHERE source_record_url LIKE 'https://test.example.com/%'"
+        # raw.* rows the helpers above inserted
+        for tbl in [
+            "raw.shopify_orders",
+            "raw.shopify_customers",
+            "raw.shopify_products",
+            "raw.shopify_refunds",
+        ]:
+            await s.execute(
+                text(f"DELETE FROM {tbl} WHERE source_record_url LIKE 'https://test.example.com/%'")
             )
-        )
         await s.execute(
             text(
                 "DELETE FROM raw.shopify_webhook_inbox "
@@ -265,3 +302,147 @@ async def test_shopify_webhook_job_skips_non_cod_orders():
         )
         count = r.scalar_one()
     assert count == 0
+
+
+# ---------- customer / product / refund round-trips ----------
+
+
+@pytest.mark.asyncio
+async def test_connector_record_job_writes_to_core_customer():
+    """Worker normalizes a Shopify customer Record and writes core.customer."""
+    tid = str(uuid.uuid4())
+    cust = {
+        "id": 90001,
+        "email": "x90001@example.com",
+        "phone": "+919000000001",
+        "default_address": {"country_code": "IN"},
+        "created_at": "2026-04-01T00:00:00Z",
+    }
+    row_id = await _insert_raw_generic("raw.shopify_customers", tid, str(cust["id"]), cust)
+
+    await enqueue(
+        "realtime",
+        tid,
+        "connector_record",
+        {
+            "source_system": "shopify",
+            "stream": "customers",
+            "raw_table": "raw.shopify_customers",
+            "raw_row_id": row_id,
+        },
+    )
+    row = None
+    for _ in range(50):
+        await process_one()
+        async with SessionLocal() as s:
+            r = await s.execute(
+                text(
+                    "SELECT email_hash, country, raw_table, raw_row_id "
+                    "FROM core.customer WHERE tenant_id = :t AND source_id = :sid"
+                ),
+                {"t": tid, "sid": str(cust["id"])},
+            )
+            row = r.first()
+        if row is not None:
+            break
+    assert row is not None, "worker did not write the customer to core.customer"
+    assert row.country == "IN"
+    assert row.raw_table == "raw.shopify_customers"
+    assert row.raw_row_id == row_id
+    # email must be hashed, not plaintext
+    assert row.email_hash != "x90001@example.com"
+    assert len(row.email_hash) == 64
+
+
+@pytest.mark.asyncio
+async def test_connector_record_job_writes_to_core_product():
+    tid = str(uuid.uuid4())
+    sku = f"SKU-TEST-{uuid.uuid4().hex[:8]}"
+    product = {
+        "sku": sku,
+        "title": "Test Tee",
+        "price": "499.00",
+        "currency": "INR",
+    }
+    row_id = await _insert_raw_generic("raw.shopify_products", tid, sku, product)
+
+    await enqueue(
+        "realtime",
+        tid,
+        "connector_record",
+        {
+            "source_system": "shopify",
+            "stream": "products",
+            "raw_table": "raw.shopify_products",
+            "raw_row_id": row_id,
+        },
+    )
+    row = None
+    for _ in range(50):
+        await process_one()
+        async with SessionLocal() as s:
+            r = await s.execute(
+                text(
+                    "SELECT sku, title, price, raw_table, raw_row_id "
+                    "FROM core.product WHERE tenant_id = :t AND source_id = :sid"
+                ),
+                {"t": tid, "sid": sku},
+            )
+            row = r.first()
+        if row is not None:
+            break
+    assert row is not None, "worker did not write the product to core.product"
+    assert row.sku == sku
+    assert row.title == "Test Tee"
+    assert float(row.price) == 499.00
+    assert row.raw_table == "raw.shopify_products"
+    assert row.raw_row_id == row_id
+
+
+@pytest.mark.asyncio
+async def test_connector_record_job_writes_to_core_refund():
+    tid = str(uuid.uuid4())
+    refund_id = f"refund-test-{uuid.uuid4().hex[:8]}"
+    refund = {
+        "id": refund_id,
+        "amount": "250.00",
+        "reason": "damaged",
+        "created_at": "2026-05-03T10:00:00Z",
+        "_order_id": "12345678",
+    }
+    row_id = await _insert_raw_generic("raw.shopify_refunds", tid, refund_id, refund)
+
+    await enqueue(
+        "realtime",
+        tid,
+        "connector_record",
+        {
+            "source_system": "shopify",
+            "stream": "refunds",
+            "raw_table": "raw.shopify_refunds",
+            "raw_row_id": row_id,
+        },
+    )
+    row = None
+    for _ in range(50):
+        await process_one()
+        async with SessionLocal() as s:
+            r = await s.execute(
+                text(
+                    "SELECT amount, reason, order_canonical_id, raw_table, raw_row_id "
+                    "FROM core.refund WHERE tenant_id = :t AND source_id = :sid"
+                ),
+                {"t": tid, "sid": refund_id},
+            )
+            row = r.first()
+        if row is not None:
+            break
+    assert row is not None, "worker did not write the refund to core.refund"
+    assert float(row.amount) == 250.00
+    assert row.reason == "damaged"
+    assert row.raw_table == "raw.shopify_refunds"
+    assert row.raw_row_id == row_id
+    # order_canonical_id must match xref for "12345678"
+    from packages.udm.xref import canonical_id
+
+    assert str(row.order_canonical_id) == canonical_id(tid, "order", "shopify", "12345678")

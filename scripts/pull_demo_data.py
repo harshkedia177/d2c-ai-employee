@@ -49,6 +49,9 @@ MERCHANT = "m000"
 RAW_TABLES = {
     ("shopify", "orders"): "raw.shopify_orders",
     ("shopify", "line_items"): "raw.shopify_line_items",
+    ("shopify", "customers"): "raw.shopify_customers",
+    ("shopify", "products"): "raw.shopify_products",
+    ("shopify", "refunds"): "raw.shopify_refunds",
     ("shiprocket", "shipments"): "raw.shiprocket_shipments",
     ("meta_ads", "campaigns"): "raw.meta_campaigns",
     ("meta_ads", "ad_insights"): "raw.meta_ad_insights",
@@ -77,6 +80,9 @@ async def _truncate_tenant_data(tenant_id: str) -> None:
         )
         await s.execute(text('DELETE FROM core."order" WHERE tenant_id = :t'), {"t": tenant_id})
         await s.execute(text("DELETE FROM core.order_line WHERE tenant_id = :t"), {"t": tenant_id})
+        await s.execute(text("DELETE FROM core.customer WHERE tenant_id = :t"), {"t": tenant_id})
+        await s.execute(text("DELETE FROM core.product WHERE tenant_id = :t"), {"t": tenant_id})
+        await s.execute(text("DELETE FROM core.refund WHERE tenant_id = :t"), {"t": tenant_id})
         await s.execute(text("DELETE FROM core.shipment WHERE tenant_id = :t"), {"t": tenant_id})
         await s.execute(text("DELETE FROM core.campaign WHERE tenant_id = :t"), {"t": tenant_id})
         await s.execute(

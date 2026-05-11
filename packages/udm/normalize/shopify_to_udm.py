@@ -113,3 +113,61 @@ def customer_from_shopify(
             source_system="shopify",
         ),
     }
+
+
+def product_from_shopify(
+    record: Record,
+    tenant_id: str,
+    raw_row_id: int,
+) -> dict[str, Any]:
+    """Normalize a synthetic Product Record derived from a line_item.
+
+    The Shopify connector emits a Product Record for each unique SKU it
+    encounters in line_items. The Record's payload carries {sku, title, price}.
+    """
+    p = record.payload
+    sku = str(p["sku"])
+    return {
+        "tenant_id": tenant_id,
+        "canonical_id": canonical_id(tenant_id, "product", "shopify", sku),
+        "sku": sku,
+        "title": p.get("title"),
+        "price": float(p["price"]) if p.get("price") else None,
+        "currency": p.get("currency", "INR"),
+        "cost_per_item": None,  # not exposed by mock; v1 would fetch from Shopify Inventory API
+        "vendor": p.get("vendor"),
+        **provenance_columns(
+            record=record,
+            raw_table="raw.shopify_products",
+            raw_row_id=raw_row_id,
+            connector_version=CONNECTOR_VERSION,
+            source_system="shopify",
+        ),
+    }
+
+
+def refund_from_shopify(
+    record: Record,
+    tenant_id: str,
+    raw_row_id: int,
+) -> dict[str, Any]:
+    """Normalize a Shopify refund. Payload carries {id, amount, reason, created_at}
+    plus ``_order_id`` appended by the connector before yielding.
+    """
+    p = record.payload
+    order_src = str(p["_order_id"])
+    return {
+        "tenant_id": tenant_id,
+        "canonical_id": canonical_id(tenant_id, "refund", "shopify", record.primary_key),
+        "order_canonical_id": canonical_id(tenant_id, "order", "shopify", order_src),
+        "amount": float(p["amount"]) if p.get("amount") else None,
+        "reason": p.get("reason"),
+        "refunded_at": p.get("created_at"),
+        **provenance_columns(
+            record=record,
+            raw_table="raw.shopify_refunds",
+            raw_row_id=raw_row_id,
+            connector_version=CONNECTOR_VERSION,
+            source_system="shopify",
+        ),
+    }

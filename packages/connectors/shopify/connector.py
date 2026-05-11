@@ -100,6 +100,12 @@ class ShopifyConnector:
             params["updated_at_min"] = cursor
         max_seen = cursor
 
+        # Dedupe customers + products within a single connector run; this
+        # keeps the volume of emitted Records bounded by unique customer ids
+        # / SKUs rather than order count.
+        seen_customer_ids: set[str] = set()
+        seen_skus: set[str] = set()
+
         while True:
             rl = config.get("rate_limiter")
             if rl is not None:
@@ -111,24 +117,67 @@ class ShopifyConnector:
                 break
 
             for o in orders:
+                now_ts = datetime.now(UTC)
+                shop_domain = config["shop_domain"]
+
                 yield Record(
                     stream="orders",
                     primary_key=str(o["id"]),
                     payload=o,
-                    source_record_url=(f"https://{config['shop_domain']}/admin/orders/{o['id']}"),
-                    fetched_at=datetime.now(UTC),
+                    source_record_url=f"https://{shop_domain}/admin/orders/{o['id']}",
+                    fetched_at=now_ts,
                 )
-                # emit each line item as its own Record on the line_items stream
+
+                # Customer (embedded in order; emit once per unique id this run)
+                cust = o.get("customer") or {}
+                cust_id = cust.get("id")
+                if cust_id is not None and str(cust_id) not in seen_customer_ids:
+                    seen_customer_ids.add(str(cust_id))
+                    yield Record(
+                        stream="customers",
+                        primary_key=str(cust_id),
+                        payload=cust,
+                        source_record_url=(f"https://{shop_domain}/admin/customers/{cust_id}"),
+                        fetched_at=now_ts,
+                    )
+
+                # Line items + Products (one product Record per unique SKU this run)
                 for li in o.get("line_items", []):
                     yield Record(
                         stream="line_items",
                         primary_key=f"{o['id']}:{li['id']}",
                         payload={**li, "_order_id": o["id"]},
-                        source_record_url=(
-                            f"https://{config['shop_domain']}/admin/orders/{o['id']}"
-                        ),
-                        fetched_at=datetime.now(UTC),
+                        source_record_url=f"https://{shop_domain}/admin/orders/{o['id']}",
+                        fetched_at=now_ts,
                     )
+                    sku = li.get("sku")
+                    if sku and sku not in seen_skus:
+                        seen_skus.add(sku)
+                        yield Record(
+                            stream="products",
+                            primary_key=sku,
+                            payload={
+                                "sku": sku,
+                                "title": li.get("title"),
+                                "price": li.get("price"),
+                                "currency": o.get("currency", "INR"),
+                            },
+                            source_record_url=(f"https://{shop_domain}/admin/products?sku={sku}"),
+                            fetched_at=now_ts,
+                        )
+
+                # Refunds (one Record per refund in order.refunds)
+                for ref in o.get("refunds", []) or []:
+                    yield Record(
+                        stream="refunds",
+                        primary_key=str(ref["id"]),
+                        payload={**ref, "_order_id": o["id"]},
+                        source_record_url=(
+                            f"https://{shop_domain}/admin/orders/{o['id']}#refund-{ref['id']}"
+                        ),
+                        fetched_at=now_ts,
+                    )
+
                 if max_seen is None or o["updated_at"] > max_seen:
                     max_seen = o["updated_at"]
 

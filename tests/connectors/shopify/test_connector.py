@@ -56,10 +56,17 @@ def test_read_orders_yields_records_with_provenance():
     out = list(c.read("orders", cfg, state=None))
     records = [r for r in out if hasattr(r, "primary_key")]
     checkpoints = [r for r in out if not hasattr(r, "primary_key")]
-    assert len(records) == 1
-    assert records[0].primary_key == "12345"
-    assert records[0].source_record_url == ("https://m000.myshopify.com/admin/orders/12345")
-    assert records[0].payload_hash
+    # 1 order Record + 1 customer Record (customer.id = 1, no line_items so no
+    # product Record, no refunds). The connector emits customer Records inline
+    # as part of orders read.
+    order_records = [r for r in records if r.stream == "orders"]
+    assert len(order_records) == 1
+    assert order_records[0].primary_key == "12345"
+    assert order_records[0].source_record_url == "https://m000.myshopify.com/admin/orders/12345"
+    assert order_records[0].payload_hash
+    customer_records = [r for r in records if r.stream == "customers"]
+    assert len(customer_records) == 1
+    assert customer_records[0].primary_key == "1"
     # one Checkpoint emitted for the page
     assert len(checkpoints) == 1
     assert checkpoints[0].cursor["updated_at_min"] == "2026-05-01T10:00:00Z"
