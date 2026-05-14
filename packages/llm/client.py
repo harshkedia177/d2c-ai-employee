@@ -43,5 +43,5 @@ class LLMClient(Protocol):
         system: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
-        model: str = "gemini-3-pro",
+        model: str = "gemini-3-flash-preview",
     ) -> LLMResponse: ...

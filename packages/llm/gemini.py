@@ -94,7 +94,7 @@ class GeminiClient:
         system: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
-        model: str = "gemini-3-pro",
+        model: str = "gemini-3-flash-preview",
     ) -> LLMResponse:
         client = self._ensure_client()
         gemini_tools = [{"function_declarations": _to_gemini_schema(tools)}] if tools else None

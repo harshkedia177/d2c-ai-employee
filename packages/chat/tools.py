@@ -61,10 +61,14 @@ def _coerce_date_filter(filters: dict[str, Any]) -> dict[str, Any]:
     out = dict(filters)
     DATE_FIELDS = (  # noqa: N806 (constant-style local; matches spec)
         "placed_at",
+        "shipped_at",
         "shipped_date",
+        "delivered_at",
         "delivered_date",
         "rto_at",
         "date",
+        "created_at",
+        "timestamp",
         "ingested_at",
         "fetched_at",
     )

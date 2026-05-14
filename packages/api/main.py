@@ -1,7 +1,15 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+)
+logging.getLogger("packages").setLevel(logging.INFO)
 
 from packages.api.chat_routes import router as chat_router
 from packages.api.run_log_routes import router as runs_router

@@ -1,3 +1,10 @@
+# One-command bring-up for the d2c-ai-employee demo.
+#
+#   docker compose up        → infra, schema, data ingest, embeddings, agents, api, chat ui
+#
+# When this exits with chat-ui ready, open http://localhost:3000.
+# Pass GEMINI_API_KEY via .env (see .env.example) — leave blank to skip embedding seed.
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -7,32 +14,104 @@ services:
     ports: ["5433:5432"]
     volumes: [pg_data:/var/lib/postgresql/data]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d d2c"]
       interval: 2s
       timeout: 5s
-      retries: 10
+      retries: 20
 
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
 
   mock_saas:
-    build: ./mock_saas
+    build:
+      context: .
+      dockerfile: mock_saas/Dockerfile
     ports: ["9000:9000"]
+
+  # Shared python image — built once, reused by migrate/worker/bootstrap/api.
+  # `app` itself is never run (profile gates it); it just owns the build.
+  app:
+    image: d2c-app
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+    profiles: ["build-only"]
+
+  migrate:
+    image: d2c-app
+    depends_on:
+      app: {condition: service_completed_successfully, required: false}
+      postgres: {condition: service_healthy}
     environment:
-      SEED_MERCHANTS: "1"
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/d2c
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+
+  worker:
+    image: d2c-app
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/d2c
+      REDIS_URL: redis://redis:6379/0
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    command: ["python", "-m", "packages.ingestion.worker"]
+    restart: unless-stopped
+
+  bootstrap:
+    image: d2c-app
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      mock_saas: {condition: service_healthy}
+      worker: {condition: service_started}
+      redis: {condition: service_healthy}
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/d2c
+      REDIS_URL: redis://redis:6379/0
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      SHOPIFY_BASE_URL: http://mock_saas:9000/shopify
+      META_BASE_URL: http://mock_saas:9000/meta
+      SHIPROCKET_BASE_URL: http://mock_saas:9000/shiprocket
+    command: ["python", "scripts/bootstrap.py"]
+    restart: "no"
+
+  api:
+    image: d2c-app
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/d2c
+      REDIS_URL: redis://redis:6379/0
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      SHOPIFY_BASE_URL: http://mock_saas:9000/shopify
+      META_BASE_URL: http://mock_saas:9000/meta
+      SHIPROCKET_BASE_URL: http://mock_saas:9000/shiprocket
+    ports: ["8000:8000"]
+    command: ["uvicorn", "packages.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
 
   chat_ui:
     build:
       context: ./apps/chat-ui
       dockerfile: Dockerfile
+    depends_on:
+      bootstrap: {condition: service_completed_successfully}
+      api: {condition: service_healthy}
     ports: ["3000:3000"]
     environment:
+      # The browser hits localhost:8000 (host port mapping); chat-ui doesn't proxy.
       NEXT_PUBLIC_API_BASE_URL: "http://localhost:8000"
-    depends_on:
-      - postgres
 
 volumes:
   pg_data:

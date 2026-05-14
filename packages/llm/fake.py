@@ -26,7 +26,7 @@ class FakeLLMClient:
         system: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
-        model: str = "gemini-3-pro",
+        model: str = "gemini-3-flash-preview",
     ) -> LLMResponse:
         self.calls.append((system, messages, tools, model))
         if not self._scripted:

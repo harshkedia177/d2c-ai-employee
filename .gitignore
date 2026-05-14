@@ -1,3 +1,14 @@
 docs/plans
 __pycache__/
 mock_saas/seed/data/
+.env
+.venv/
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+**/__pycache__/
+**/*.pyc
+node_modules/
+**/node_modules/
+.next/
+**/.next/

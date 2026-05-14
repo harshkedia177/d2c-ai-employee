@@ -1,0 +1,22 @@
+.git
+.venv
+.ruff_cache
+.pytest_cache
+__pycache__
+**/__pycache__
+**/*.pyc
+**/*.pyo
+.mypy_cache
+node_modules
+**/node_modules
+.next
+**/.next
+apps/chat-ui/node_modules
+tasks/
+docs/
+README.md
+.env
+
+# Seed data is gitignored and re-generated at build time inside mock_saas image.
+# Excluding from build context keeps builds reproducible regardless of host state.
+mock_saas/seed/data/

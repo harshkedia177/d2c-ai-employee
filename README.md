@@ -19,25 +19,47 @@ A working v0 of an "AI employee for Indian D2C brands": three SaaS connectors be
 
 ---
 
-## Quick start
+## Quick start (one command)
+
+```bash
+cp .env.example .env        # set GEMINI_API_KEY=...
+docker compose up           # builds, migrates, ingests, embeds, serves
+```
+
+When `bootstrap-1 exited (0)` and `chat_ui-1 ready in N ms` appear, open
+**http://localhost:3000** — the demo tenant is pre-populated with ~2k orders,
+~2k shipments, ad insights, agent runs, and 8 embedded few-shot examples.
+No host-side Python/uv/Node required.
+
+What the bring-up does, in order:
+1. **postgres + redis + mock_saas** boot with healthchecks
+2. **migrate** runs `alembic upgrade head` (idempotent)
+3. **worker** starts draining `control.queue_realtime`
+4. **bootstrap** pulls connector data → core via the worker, runs cron agents,
+   embeds `core.few_shot_examples` via `gemini-embedding-001`, prints a summary
+5. **api** (FastAPI :8000) and **chat_ui** (Next.js :3000) come up only after
+   bootstrap exits 0 — so the recruiter never lands on an empty UI
+
+Leave `GEMINI_API_KEY` blank to skip embedding seed and the live LLM call;
+`search_examples` will fall back to substring overlap.
+
+The Postgres volume persists across runs (`docker compose down` keeps data;
+`docker compose down -v` wipes it). The bootstrap skips re-pulling /
+re-embedding if data is already there, so subsequent `docker compose up`
+calls are fast.
+
+### Developer-mode (host-side python)
 
 ```bash
 make install                # uv sync
-docker compose up -d postgres redis
-make migrate                # alembic upgrade head
-uv run python -m mock_saas.seed.generate --merchants=1
-make test                   # 193 passing
-```
-
-To run the chat backend live:
-
-```bash
+docker compose up -d postgres redis mock_saas
+make migrate
+make test                   # 223 passing
+uv run python scripts/bootstrap.py    # populate data + embeddings
 uv run uvicorn packages.api.main:app --reload --port 8000
-# POST {"tenant_id": "<uuid>", "message": "What's my GMV?"} to http://localhost:8000/chat
-# (provide a real GEMINI_API_KEY in .env to use Gemini 3 Pro)
 ```
 
-To trigger a synthetic Shopify webhook against the RTO agent:
+### Trigger a synthetic Shopify webhook against the RTO agent
 
 ```bash
 curl -X POST http://localhost:8000/webhooks/shopify \
@@ -103,7 +125,7 @@ See [`docs/eval-honesty.md`](docs/eval-honesty.md). Highlights:
 - **Auto-execution of writes** — the brief explicitly says no, also reckless without per-merchant tuning. `propose_write(dry_run=True)` is the only path; `dry_run=False` returns a v1 error.
 - **Multi-currency normalization beyond INR** — Indian D2C focus.
 - **A polished Next.js chat UI** — `POST /chat` works (returns rendered text + footnotes JSON). We hot-pathed to citation contract + agents + eval suite instead, since the brief weights judgment + craft equally and the UI shows craft, not judgment. UI is sketched in v1 (Tasks 18 + 23 of the implementation plan).
-- **Embedding generation for `search_examples`** — Task 14 uses naive substring overlap; pgvector `halfvec(3072)` schema is in place but `gemini-embedding-001` wiring is a v1 follow-up.
+- *(was a v1 follow-up — now done)* Embedding generation for `search_examples`. `scripts/seed_examples.py` embeds the curated examples via `gemini-embedding-001` at 3072 dims into `core.few_shot_examples` (halfvec + HNSW). Falls back to substring overlap when no API key is configured or the table is empty.
 
 ## Repo tour
 

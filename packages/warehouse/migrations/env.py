@@ -1,3 +1,4 @@
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -6,6 +7,13 @@ from sqlalchemy import engine_from_config, pool
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+# Allow DATABASE_URL to override the static URL in alembic.ini. Alembic is
+# sync, so swap an async driver suffix to its sync equivalent.
+_db_url = os.environ.get("DATABASE_URL")
+if _db_url:
+    _db_url = _db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://")
+    config.set_main_option("sqlalchemy.url", _db_url)
 
 target_metadata = None
 

@@ -59,6 +59,36 @@ def _parse_citation_select(citation_select: str) -> list[tuple[str, str]]:
     return out
 
 
+# Field names the LLM commonly emits as "the time filter" regardless of the
+# metric's actual time column. Compiler rewrites these to the metric's
+# canonical `time_column` when one is declared in metrics.yml.
+_TIME_ALIASES = frozenset(
+    {"date", "placed_at", "shipped_at", "delivered_at", "rto_at", "created_at", "timestamp"}
+)
+
+
+def _rewrite_time_filters(
+    filters: dict[str, Any], time_column: str | None
+) -> dict[str, Any]:
+    """Aliases generic time filter keys (`date__gte`, `created_at__lte`, ...) to
+    the metric's declared `time_column`. No-op if the metric doesn't declare one
+    or the key's field already matches."""
+    if not time_column:
+        return filters
+    out: dict[str, Any] = {}
+    for raw_key, value in filters.items():
+        if "__" in raw_key:
+            field, op = raw_key.rsplit("__", 1)
+        else:
+            field, op = raw_key, "eq"
+        if field in _TIME_ALIASES and field != time_column:
+            new_key = f"{time_column}__{op}" if op != "eq" else time_column
+            out[new_key] = value
+        else:
+            out[raw_key] = value
+    return out
+
+
 def _filter_clause(filters: dict[str, Any], base_alias: str) -> tuple[str, dict[str, Any]]:
     """Convert filter dict into 'AND ...' SQL fragment + params."""
     parts: list[str] = []
@@ -141,7 +171,8 @@ def compile_metric(
         dim_select_parts.append(f"{dim_sql} AS {d}")
         dim_group_parts.append(dim_sql)
 
-    where_sql, params = _filter_clause(filters or {}, base_alias)
+    filters = _rewrite_time_filters(filters or {}, meta.get("time_column"))
+    where_sql, params = _filter_clause(filters, base_alias)
     params["tenant_id"] = tenant_id
     params["citation_limit"] = citation_limit
 
@@ -192,12 +223,17 @@ def list_metrics() -> list[dict[str, Any]]:
     config = _load_config()
     out = []
     for name, meta in config["metrics"].items():
+        time_col = meta.get("time_column")
         out.append(
             {
                 "id": name,
                 "description": meta["description"],
                 "grain": meta["grain"],
                 "min_sample_size": meta.get("min_sample_size", 0),
+                "time_column": time_col,
+                "filter_examples": (
+                    [f"{time_col}__gte", f"{time_col}__lte"] if time_col else []
+                ),
             }
         )
     return out

@@ -35,15 +35,37 @@ MAX_VERIFY_RETRIES = 2
 SYSTEM_PROMPT = """You are a D2C analytics assistant for an Indian D2C brand.
 
 CRITICAL RULES (non-negotiable):
-1. NEVER type a literal numeral in your final answer. Numbers MUST be
-   referenced via placeholders of the form {{m:metric_id_N}} where the id
-   matches a result you have received from compute_metric in this turn.
+1. NEVER type a literal numeral (any digit 0-9) in your final answer. This
+   includes numbers from the user's question. Rephrase to drop them:
+     - "last 30 days" → "last month" or "the last thirty days" (words, not digits)
+     - "top 10 pincodes" → "top pincodes" or "the leading pincodes"
+     - "post-RTO ROAS last 7 days" → "post-RTO ROAS for the past week"
+   Numbers ONLY appear via placeholders of the form {{m:metric_id_N}} where
+   the id matches a compute_metric result from this turn. Every successful
+   compute_metric response contains a `placeholder` field (for scalar
+   results) or one `placeholder` field per row (for dimensional results) —
+   use those exact tokens verbatim in your final answer. Do NOT invent new
+   ids or guess the index. Dimension values (pincodes, ad ids, dates) MAY
+   appear as bare strings — they are keys, not measurements. Spelling out
+   a number in words is fine; typing a digit anywhere else is forbidden.
 2. Use compute_metric for every number. Use search_examples for novel
-   questions to find precedent plans.
-3. If the user asks you to "estimate", "approximate", or "guess" a number
-   without sufficient data, REFUSE and ask them to specify a date range or
-   filter so you can compute it precisely.
-4. Cite by reference, not invention. The renderer attaches footnotes to
+   questions to find precedent plans. Call get_schema first when uncertain
+   which metric or filter to use — its `time_column` and `filter_examples`
+   fields tell you the exact key name to pass for date filters.
+3. Time filters MUST use the metric's declared `time_column` from
+   get_schema (e.g. `placed_at__gte` for gmv/aov, `shipped_at__gte` for
+   rto_rate, `date__gte` for cac/post_rto_roas). Operators: `__gte`,
+   `__lte`, `__eq`, `__in`. Do NOT invent generic names like
+   `created_at__gte` unless that column appears in the schema.
+4. If the user asks you to "estimate", "approximate", "guess", or compare
+   against an "industry average / benchmark / typical D2C brand", REFUSE
+   directly — do not silently pivot to a different metric. Reply with:
+   "I can only report numbers I compute from your data. I don't have
+   industry benchmarks or estimates." Then offer a precise alternative
+   ("If you specify a date range I can compute your actual GMV for that
+   period."). Never make up a number, and never substitute a related
+   metric for the one that can't be answered.
+5. Cite by reference, not invention. The renderer attaches footnotes to
    each placeholder; the user clicks through to source rows.
 
 When you have all the data you need, emit a single final answer. The
@@ -66,12 +88,22 @@ async def chat_turn(
     metric_results: dict[str, dict[str, Any]] = {}
     metric_counter: dict[str, int] = {}
     formats: dict[str, str] = {}
+    # Numeric strings the verifier should treat as already-cited, on top of
+    # whatever the renderer adds. Used for dimension values (pincodes,
+    # ad_ids, dates) — those are keys, not measurements.
+    permitted_literals: set[str] = set()
 
     for _turn in range(MAX_TURNS):
         resp: LLMResponse = await llm.generate(
             system=SYSTEM_PROMPT,
             messages=messages,
             tools=TOOL_SCHEMAS,
+        )
+        log.info(
+            "turn=%d tool_calls=%s draft=%r",
+            _turn,
+            [(tc.name, tc.arguments) for tc in (resp.tool_calls or [])],
+            (resp.text or "")[:200],
         )
 
         # If the model called tools, run them and loop.
@@ -94,30 +126,65 @@ async def chat_turn(
                     result = {"error": str(e)}
 
                 # If this was a compute_metric, register the result for placeholder use.
+                placeholder_key: str | None = None
+                row_placeholders: list[str] = []
+                tool_payload = _serializable(result)
                 if tc.name == "compute_metric" and "value" in result:
                     metric_id = tc.arguments.get("metric_id", "metric")
                     n = metric_counter.get(metric_id, 0)
                     placeholder_key = f"{metric_id}_{n}"
                     metric_counter[metric_id] = n + 1
                     metric_results[placeholder_key] = result
-                    # Heuristic format: pct for *_rate metrics, inr for spend/revenue
-                    if metric_id.endswith("_rate") or metric_id == "rto_rate":
-                        formats[placeholder_key] = "pct"
-                    elif metric_id in (
-                        "gmv",
-                        "aov",
-                        "cac",
-                        "contribution_margin_per_order",
-                    ):
-                        formats[placeholder_key] = "inr"
-                    else:
-                        formats[placeholder_key] = "auto"
+                    formats[placeholder_key] = _format_for(metric_id)
+                elif tc.name == "compute_metric" and "rows" in result:
+                    metric_id = tc.arguments.get("metric_id", "metric")
+                    base_n = metric_counter.get(metric_id, 0)
+                    provenance = result.get("provenance") or {}
+                    rows_out: list[dict[str, Any]] = []
+                    # Use already-serialized rows so date/UUID/Decimal don't leak.
+                    serialized_rows = (
+                        tool_payload.get("rows") if isinstance(tool_payload, dict) else []
+                    ) or []
+                    import re as _re
 
+                    _num_re = _re.compile(r"\b\d[\d,]*(?:\.\d+)?\b")
+                    for i, srow in enumerate(serialized_rows):
+                        pkey = f"{metric_id}_{base_n}_{i}"
+                        per_row_result = {
+                            "value": srow.get("value"),
+                            "provenance": {
+                                "metric_id": metric_id,
+                                "query_hash": provenance.get("query_hash"),
+                                "citations": srow.get("citations")
+                                or _serializable(provenance.get("citations")),
+                                "sample_size": srow.get("sample_size")
+                                or provenance.get("sample_size"),
+                            },
+                        }
+                        metric_results[pkey] = per_row_result
+                        formats[pkey] = _format_for(metric_id)
+                        row_placeholders.append(pkey)
+                        for k, v in srow.items():
+                            if k in ("value", "citations", "sample_size"):
+                                continue
+                            if v is None:
+                                continue
+                            sv = str(v)
+                            permitted_literals.add(sv)
+                            for _m in _num_re.finditer(sv):
+                                permitted_literals.add(_m.group())
+                        rows_out.append({**srow, "placeholder": f"{{{{m:{pkey}}}}}"})
+                    metric_counter[metric_id] = base_n + len(rows_out)
+                    if isinstance(tool_payload, dict):
+                        tool_payload["rows"] = rows_out
+
+                if placeholder_key is not None and isinstance(tool_payload, dict):
+                    tool_payload["placeholder"] = f"{{{{m:{placeholder_key}}}}}"
                 messages.append(
                     {
                         "role": "tool",
                         "tool_name": tc.name,
-                        "content": _serializable(result),
+                        "content": tool_payload,
                     }
                 )
             continue  # loop back to LLM
@@ -140,7 +207,8 @@ async def chat_turn(
             )
             continue
 
-        violations = find_violations(rendered.text, rendered.substituted_values)
+        allowed = rendered.substituted_values | frozenset(permitted_literals)
+        violations = find_violations(rendered.text, allowed)
         if violations:
             # Up to MAX_VERIFY_RETRIES, ask the model to restate.
             verify_attempts = sum(
@@ -165,9 +233,13 @@ async def chat_turn(
                     "role": "system",
                     "content": (
                         f"VERIFIER REJECTED. Literal numeral(s) {offending} "
-                        "appeared in your answer. You MUST restate using only "
-                        "{{m:placeholder}} tokens that match compute_metric "
-                        "results from this turn. Do not type any digit yourself."
+                        "appeared in your answer. You MUST rephrase to remove "
+                        "every digit. If the numeral came from the user's "
+                        "question (e.g. 'last 30 days'), restate it in words "
+                        "('last month', 'past thirty days') or drop the period "
+                        "reference entirely. Keep the {{m:placeholder}} tokens "
+                        "for metric values. Do not invent new placeholder ids — "
+                        "only use ids returned by compute_metric this turn."
                     ),
                 }
             )
@@ -186,10 +258,19 @@ async def chat_turn(
     }
 
 
+def _format_for(metric_id: str) -> str:
+    if "_rate" in metric_id or metric_id == "rto_rate":
+        return "pct"
+    if metric_id in ("gmv", "aov", "cac", "contribution_margin_per_order"):
+        return "inr"
+    return "auto"
+
+
 def _serializable(obj: Any) -> Any:
-    """Convert decimals/dates to plain types for JSON serialization."""
+    """Convert decimals/dates/UUIDs to plain types for JSON serialization."""
     import datetime as _dt
     from decimal import Decimal
+    from uuid import UUID
 
     if isinstance(obj, dict):
         return {k: _serializable(v) for k, v in obj.items()}
@@ -199,4 +280,6 @@ def _serializable(obj: Any) -> Any:
         return float(obj)
     if isinstance(obj, _dt.date | _dt.datetime):
         return obj.isoformat()
+    if isinstance(obj, UUID):
+        return str(obj)
     return obj
