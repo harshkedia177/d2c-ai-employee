@@ -18,8 +18,8 @@ What works, what breaks, what we did NOT build — said out loud before reviewer
 - **Cross-source attribution join** (Meta `utm_campaign` ↔ Shopify `note_attributes`) depends on merchant having UTMs configured. We degrade gracefully (returns 0 attributed_revenue) but don't surface the misconfiguration in chat — should be a v1 hint.
 - **Semantic layer covers 8 metrics.** Anything outside falls to `run_sql`, which is OFF by default and loses the curated provenance shape (citations point at raw cells, not metric semantics). Enabling it requires explicit operator review per chat.
 - **LLM brittleness:** planner picks the wrong metric on ~3-5% of golden prompts in informal testing (typically gross-vs-net revenue confusion, or wrong time grain). Mitigation is more curated `(question, plan)` few-shot pairs over time. The eval gate is "no uncited numerals," not "answer is correct" — wrong-but-cited answers are better than hallucinated answers but they still ship to the founder.
-- **Date filter binding:** filter values like `"2026-04-01"` are auto-coerced to `datetime.date` so asyncpg can bind them. Edge cases (timestamps with microseconds, non-ISO formats) fall through and asyncpg may reject — the planner currently surfaces this as a tool error and recovers, but the UX is rough.
-- **`search_examples` uses naive substring overlap**, not embedding similarity. Pgvector `halfvec(3072)` schema exists; `gemini-embedding-001` wiring is a v1 follow-up.
+- **Date filter binding:** ISO-string date values for the canonical time fields (`placed_at`, `shipped_at`, `date`, etc.) are auto-coerced to `datetime.date` so asyncpg binds cleanly, and the compiler aliases generic LLM-emitted keys (`date__gte`, `created_at__gte`) to each metric's declared `time_column`. Truly malformed strings still fall through to asyncpg and surface as a tool error — the planner recovers but the UX is rough.
+- **`search_examples` uses pgvector halfvec cosine NN** (`gemini-embedding-001` at 3072 dims, HNSW index on `core.few_shot_examples`). Falls back to substring overlap when no API key is configured *or* the table is empty — both paths return the same shape so the planner is unaware.
 
 ### RTO Risk Flagger
 
@@ -60,12 +60,11 @@ What works, what breaks, what we did NOT build — said out loud before reviewer
 - **Real OAuth** for any of the three connectors — sandbox/synthetic for the weekend. Same connector code targets prod by `base_url` swap; OAuth shim is a one-file addition.
 - **Auto-execution of writes** — the brief explicitly says no. Also reckless without per-merchant tuning. `propose_write(dry_run=True)` is the only path; `dry_run=False` returns an error message saying "v1".
 - **Multi-currency normalization beyond INR** — Indian D2C focus.
-- **A polished Next.js chat UI** — `POST /chat` works (returns rendered text + footnotes JSON). Tasks 18 + 23 of the implementation plan (chat UI + run-log viewer) are deferred to v1; we hot-pathed to citation contract + agents + eval suite instead, since the brief weights judgment + craft equally and the UI shows craft, not judgment.
-- **Embedding generation for `search_examples`** — Task 14 uses naive substring overlap. Pgvector schema with `halfvec(3072)` is in place; wiring `gemini-embedding-001` is a v1 follow-up.
+- **A polished Next.js chat UI** — `POST /chat` works (returns rendered text + footnotes JSON). The bundled `apps/chat-ui` is a thin shell over that endpoint, sufficient for the recruiter demo; the dedicated run-log viewer (Task 23 of the implementation plan) is still v1.
 
 ## Test counts (proof)
 
-193 pytest tests, all green. By area (approximate — final number is whatever `uv run pytest -q` prints):
+223 pytest tests, all green. By area (approximate — final number is whatever `uv run pytest -q` prints):
 
 - 3 warehouse migrations (partitioning + pgvector)
 - 7 connector contract (provenance mandatory)

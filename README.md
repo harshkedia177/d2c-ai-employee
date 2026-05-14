@@ -15,7 +15,7 @@ A working v0 of an "AI employee for Indian D2C brands": three SaaS connectors be
 - **Citation contract:** the LLM is *architecturally incapable* of typing a numeral. Numbers are placeholders rendered from `compute_metric()` tool returns. A regex `Verifier` catches any literal digit in the rendered draft and forces the planner to retry. After 2 retries: hard refuse with a numeral-free fallback. **All 8 must-refuse red-team prompts handled correctly** in CI evals.
 - **Autonomous agents:** RTO Risk Flagger (webhook-triggered, the hero — ~₹13k/merchant/month savings, transparent weighted rule-stack with 3 bands), Meta Campaign Pauser (6h cron, post-RTO ROAS thresholded with learning-phase skip), Pincode COD Block Recommender (daily cron, top-20 ranked, `n>=20` cold-start guard). All three behind one `Agent` Protocol — same shape, swappable, all proposing not executing.
 - **Scale harness:** per-tenant Redis Lua-atomic token bucket (the canary — Shiprocket dies first), Postgres-backed two-queue task system (realtime + backfill, prevents onboarding storms from starving live webhooks), non-blocking webhook ingress (median ~4ms in benchmark), 16 hash partitions on every fast-growing table.
-- **193 pytest tests** including a parametrized eval harness over 12 golden + 10 red-team prompts. Citation contract enforced in CI.
+- **223 pytest tests** including a parametrized eval harness over 12 golden + 10 red-team prompts. Citation contract enforced in CI.
 
 ---
 
@@ -96,11 +96,11 @@ RTO Risk Flagger is the hero — Shiprocket-rich, transparent weighted rule-stac
 
 A linear weighted score with 3 bands (LOW <0.25, MED 0.25-0.50, HIGH >0.50) instead of XGBoost is deliberate. Indian D2C founders need to argue with the score before they trust it — "pincode 110084 is 34% RTO over 87 orders, customer has 1/2 priors, ₹2,400 cart, late-night order" beats an XGBoost output they can't poke at. Marginal accuracy at the cost of explainability is the wrong trade for v0. All three agents share one `agent_runs` table queryable from chat — *"show me what the RTO agent flagged today"* becomes `search_rows("agent_runs", ...)` for free.
 
-## Why Gemini 3 Pro + gemini-embedding-001 at full 3072 dims
+## Why Gemini 3 Flash Preview + gemini-embedding-001 at full 3072 dims
 
-Tool-use reliability matters more than cost at v0 (the planner is the only LLM call in the hot path, ~$0.0009/turn at 90% implicit-cache hit). Implicit caching is on by default for 2.5+ models — 90% discount on cached tokens, zero storage cost. Our ~12k stable prefix (tool descriptions + semantic-layer schema + 30 few-shot examples) clears the 2,048-token threshold, so we get 10x cost reduction for free without setting `cache_control` headers. Embeddings stay at full 3,072 dims via pgvector `halfvec` (`vector` HNSW caps at 2,000 dims; `halfvec` caps at 4,000) — same Postgres, ~50% storage saving vs full-precision, negligible recall loss.
+The planner runs `gemini-3-flash-preview` (the default in `packages/llm/{client,gemini,fake}.py`) because it's the production-available model in the Gemini 3 family at the time of writing (`gemini-3-pro` returns 404 outside private preview tiers). The design intent was Pro for tool-use reliability — and the citation-contract architecture is what compensates: every numeral the LLM emits has to round-trip through `compute_metric` → renderer → regex `Verifier`, so even a sloppier planner cannot leak a hallucinated number. The reject-retry loop and structural alias-rewriting in the semantic layer (e.g. `date__gte` → `placed_at__gte` per metric) absorb most of Flash's tool-call drift. Swapping to Pro when API access opens up is a one-line edit thanks to the `LLMClient` Protocol.
 
-The provider abstraction (`LLMClient` Protocol + `GeminiClient` impl) means swapping to Vertex AI for compliance, or A/B-ing 3 Flash on cheap turns, is a one-file change. **Rejected:** `gemini-2.5-pro` (legacy; 3 Pro at same price is strict upgrade), truncating embeddings to 768 (we want full quality; halfvec gives us indexing), separate vector DB (operational overhead, no v0 payoff).
+Implicit caching is on by default for 2.5+ models — 90% discount on cached tokens, zero storage cost. Our stable prefix (tool descriptions + semantic-layer schema + few-shot examples) clears the 2,048-token threshold, so the cache works without setting `cache_control` headers. Embeddings stay at full 3,072 dims via pgvector `halfvec` (`vector` HNSW caps at 2,000 dims; `halfvec` caps at 4,000) — same Postgres, ~50% storage saving vs full-precision, negligible recall loss. **Rejected:** `gemini-2.5-pro` (legacy; the 3 family is a strict upgrade), truncating embeddings to 768 (we want full quality; halfvec already handles the indexing), separate vector DB (operational overhead, no v0 payoff).
 
 ## Why this scale harness
 
@@ -124,8 +124,7 @@ See [`docs/eval-honesty.md`](docs/eval-honesty.md). Highlights:
 - **Real OAuth flows** — sandbox/synthetic for the weekend. Same connector code targets prod by `base_url` swap; OAuth shim is a one-file addition.
 - **Auto-execution of writes** — the brief explicitly says no, also reckless without per-merchant tuning. `propose_write(dry_run=True)` is the only path; `dry_run=False` returns a v1 error.
 - **Multi-currency normalization beyond INR** — Indian D2C focus.
-- **A polished Next.js chat UI** — `POST /chat` works (returns rendered text + footnotes JSON). We hot-pathed to citation contract + agents + eval suite instead, since the brief weights judgment + craft equally and the UI shows craft, not judgment. UI is sketched in v1 (Tasks 18 + 23 of the implementation plan).
-- *(was a v1 follow-up — now done)* Embedding generation for `search_examples`. `scripts/seed_examples.py` embeds the curated examples via `gemini-embedding-001` at 3072 dims into `core.few_shot_examples` (halfvec + HNSW). Falls back to substring overlap when no API key is configured or the table is empty.
+- **A polished Next.js chat UI** — `POST /chat` works (returns rendered text + footnotes JSON). The bundled `apps/chat-ui` is a thin shell over that endpoint, sufficient for the recruiter demo but not a full product UI; the run-log viewer (Task 23 of the implementation plan) is still v1.
 
 ## Repo tour
 
@@ -145,7 +144,7 @@ evals/              # 12 golden + 10 red-team + citation contract sanity tests
 docs/
   plans/            # design doc + implementation plan (the "why" + the "how")
   eval-honesty.md   # where it breaks
-tests/              # 193 tests mirroring packages/* paths
+tests/              # 223 tests mirroring packages/* paths
 ```
 
 ## What "running" looks like
@@ -155,7 +154,7 @@ tests/              # 193 tests mirroring packages/* paths
 2. Normalizer               → core.<entity>            (typed, with 9 provenance cols)
 3. Webhook ingress          → realtime queue → Agent runs → core.agent_runs
 4. Chat: planner → tools → semantic-layer SQL with citations → renderer → verifier → user
-5. Each step is testable in isolation (193 tests prove it).
+5. Each step is testable in isolation (223 tests prove it).
 ```
 
 ## Sources / prior art read for this design
@@ -167,7 +166,6 @@ tests/              # 193 tests mirroring packages/* paths
 - **Multi-tenant scale:** [PlanetScale: tenancy in Postgres](https://planetscale.com/blog/approaches-to-tenancy-in-postgres), [AWS cell-based architecture](https://docs.aws.amazon.com/whitepapers/latest/saas-tenant-isolation-strategies/)
 - **pgvector:** [halfvec for >2000 dims](https://github.com/pgvector/pgvector/issues/461), [Crunchy Data HNSW guide](https://www.crunchydata.com/blog/hnsw-indexes-with-postgres-and-pgvector)
 
-Full reference list lives in `docs/plans/2026-05-10-d2c-ai-employee-design.md` §10.
 
 ## License & author
 
