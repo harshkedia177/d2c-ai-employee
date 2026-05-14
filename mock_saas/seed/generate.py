@@ -54,7 +54,13 @@ def gen_orders(merchant_id: str, n: int = 1000) -> list[dict]:
                 "total_discounts": "0.00",
                 "total_shipping_price_set": {"shop_money": {"amount": "49.00"}},
                 "currency": "INR",
+                # Real Shopify returns both: `gateway` (legacy single value) and
+                # `payment_gateway_names` (modern array of all txn gateways).
+                # https://shopify.dev/docs/api/admin-rest/latest/resources/order
                 "gateway": "Cash on Delivery" if is_cod else "razorpay",
+                "payment_gateway_names": (
+                    ["Cash on Delivery"] if is_cod else ["razorpay"]
+                ),
                 "shipping_address": {
                     "zip": pincode,
                     "city": fake.city(),
@@ -93,14 +99,21 @@ def gen_shipments(orders: list[dict]) -> list[dict]:
         rto_prob = 0.33 if (is_cod and zip_ in PINCODES_HIGH_RTO) else 0.05
         is_rto = random.random() < rto_prob
         shipped = datetime.fromisoformat(o["created_at"])
+        awb = f"AWB{random.randint(10**11, 10**12)}"
         out.append(
             {
                 "shipment_id": f"sr-{o['id']}",
                 "order_id": o["id"],
-                "awb_code": f"AWB{random.randint(10**11, 10**12)}",
+                # Real Shiprocket /v1/external/orders uses `awb`; older clients
+                # see `awb_code`. Emit both for compatibility.
+                "awb": awb,
+                "awb_code": awb,
                 "courier_name": random.choice(
                     ["Delhivery", "Ecom Express", "Bluedart", "Xpressbees"]
                 ),
+                # Real API encodes RTO in the status string ("RTO Delivered",
+                # "RTO Initiated"); the boolean is a mock convenience. The
+                # normalizer derives is_rto from the status if the boolean is absent.
                 "current_status": "RTO Delivered" if is_rto else "Delivered",
                 "is_rto": is_rto,
                 "freight_charges": round(random.uniform(45, 95), 2),
@@ -129,6 +142,8 @@ def gen_meta(merchant_id: str, n_campaigns: int = 10) -> tuple[list[dict], list[
         for d in range(90):
             day = base + timedelta(days=d)
             spend = round(random.uniform(500, 5000), 2)
+            # Real Graph API returns numeric metrics as strings, not ints.
+            # https://developers.facebook.com/docs/marketing-api/insights/
             insights.append(
                 {
                     "date_start": day.isoformat(),
@@ -137,9 +152,9 @@ def gen_meta(merchant_id: str, n_campaigns: int = 10) -> tuple[list[dict], list[
                     "ad_id": f"ad-{c['id']}-1",
                     "ad_set_id": f"adset-{c['id']}-1",
                     "spend": str(spend),
-                    "impressions": random.randint(2000, 50000),
-                    "clicks": random.randint(50, 800),
-                    "conversions": random.randint(0, 30),
+                    "impressions": str(random.randint(2000, 50000)),
+                    "clicks": str(random.randint(50, 800)),
+                    "conversions": str(random.randint(0, 30)),
                     "purchase_roas": [
                         {
                             "action_type": "purchase",

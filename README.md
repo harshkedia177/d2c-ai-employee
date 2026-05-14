@@ -15,7 +15,8 @@ A working "AI employee" for Indian D2C brands. Underneath: three SaaS connectors
 - **Citation contract:** the LLM is *architecturally incapable* of typing a numeral. Numbers are placeholders rendered from `compute_metric()` tool returns. A regex `Verifier` catches any literal digit in the rendered draft and forces the planner to retry. After 2 retries: hard refuse with a numeral-free fallback. **All 8 must-refuse red-team prompts handled correctly** in CI evals.
 - **Autonomous agents:** RTO Risk Flagger (webhook-triggered, the hero — ~₹13k/merchant/month savings, transparent weighted rule-stack with 3 bands), Meta Campaign Pauser (6h cron, post-RTO ROAS thresholded with learning-phase skip), Pincode COD Block Recommender (daily cron, top-20 ranked, `n>=20` cold-start guard). All three behind one `Agent` Protocol — same shape, swappable, all proposing not executing.
 - **Scale harness:** per-tenant Redis Lua-atomic token bucket so onboarding waves don't trip third-party rate limits, Postgres-backed two-queue task system (realtime + backfill, prevents onboarding storms from starving live webhooks), non-blocking webhook ingress (median ~4ms in benchmark), 16 hash partitions on every fast-growing table.
-- **223 pytest tests** including a parametrized eval harness over 12 golden + 10 red-team prompts. Citation contract enforced in CI.
+- **Dual-mode connectors:** drop a `SHOPIFY_ACCESS_TOKEN` / `META_ACCESS_TOKEN` / `SHIPROCKET_EMAIL+PASSWORD` into `.env` and that connector flips from `mock_saas` to the real API on next bring-up — same code path, same tests, no rebuild. Mixing modes per-source is fine. See *Connecting real APIs* below.
+- **227 pytest tests** including a parametrized eval harness over 12 golden + 10 red-team prompts. Citation contract enforced in CI.
 
 ---
 
@@ -48,13 +49,39 @@ The Postgres volume persists across runs (`docker compose down` keeps data;
 re-embedding if data is already there, so subsequent `docker compose up`
 calls are fast.
 
+### Connecting real APIs
+
+The demo runs against `mock_saas` (a FastAPI fixture that serves Faker-generated Shopify / Meta / Shiprocket data) so a reviewer can spin everything up without external accounts. The connectors are written against each platform's documented contract though — drop the credentials below into `.env` and that source flips from mock to real on the next `docker compose up`. Mixing is supported: real Shiprocket + mock Shopify + real Meta all work simultaneously.
+
+```bash
+# Shopify Admin REST (Custom App on a dev store from partners.shopify.com)
+SHOPIFY_SHOP_DOMAIN=your-store.myshopify.com
+SHOPIFY_ACCESS_TOKEN=shpat_xxxxxxxxxxxxxxxxxxxxxx
+SHOPIFY_WEBHOOK_SECRET=xxxxx            # turns on HMAC verification on /webhooks/shopify
+
+# Meta Marketing API (System User token w/ ads_read in Business Manager)
+META_ACCESS_TOKEN=EAAxxxxxxxx
+META_AD_ACCOUNT_ID=act_1234567890
+
+# Shiprocket (Settings → API → Configure → API user, NOT your dashboard login)
+SHIPROCKET_EMAIL=apiuser@yourbrand.in
+SHIPROCKET_PASSWORD=xxxxxxxx
+```
+
+What changes in real mode:
+- **Shopify**: requests go to `https://<shop>.myshopify.com/admin/api/<version>/orders.json` with an `X-Shopify-Access-Token` header; pagination follows the `Link: <…>; rel="next"` response header (the modern Shopify-documented cursor path, [docs](https://shopify.dev/docs/api/admin-rest)). Webhook ingress HMAC-verifies the body against `SHOPIFY_WEBHOOK_SECRET` per [Shopify's documented scheme](https://shopify.dev/docs/apps/build/webhooks/subscribe/https#step-3-verify-the-webhook) and returns `401` on missing / wrong signatures.
+- **Meta**: requests go to `https://graph.facebook.com/v19.0/act_<id>/...` with `access_token=` as a query param; insights pagination follows the `paging.cursors.after` cursor returned by the Graph API.
+- **Shiprocket**: `POST /v1/external/auth/login` returns a Bearer token cached for 240 hours per [Shiprocket's auth docs](https://support.shiprocket.in/support/solutions/articles/43000337456-shiprocket-api-document-helpsheet); `GET /v1/external/orders` paginates by `page` / `per_page`.
+
+Each connector decides its mode independently by inspecting which env vars are set — there is no global toggle, so a missing credential always falls back to `mock_saas` rather than failing the bring-up. Sandbox notes per platform (free dev stores, test ad accounts, Shiprocket UAT) are in `.env.example`.
+
 ### Developer-mode (host-side python)
 
 ```bash
 make install                # uv sync
 docker compose up -d postgres redis mock_saas
 make migrate
-make test                   # 223 passing
+make test                   # 227 passing
 uv run python scripts/bootstrap.py    # populate data + embeddings
 uv run uvicorn packages.api.main:app --reload --port 8000
 ```
@@ -127,7 +154,7 @@ See [`docs/eval-honesty.md`](docs/eval-honesty.md). Highlights:
 ## What we explicitly did NOT build
 
 - **Marts layer (dbt-style)** — premature; canonical plus on-demand SQL is sufficient for the query latencies this system needs to hit.
-- **Real OAuth flows** — sandbox / synthetic credentials for this submission. The same connector code targets prod by swapping `base_url`; the OAuth shim is a one-file addition that doesn't change anything else.
+- **Interactive OAuth flows** — each connector authenticates against the real API using the platform's documented server-to-server credential (Shopify Custom App token, Meta System User token, Shiprocket API user). Distribution-style OAuth (Partner Dashboard install flow, Business Manager pop-up) is the missing piece if this were ever shipped as a multi-tenant install from the Shopify App Store. For an "AI employee" deployed per merchant, the credential-based path is what production looks like.
 - **Auto-execution of writes** — the brief explicitly says no, and frankly it would be reckless without per-merchant tuning anyway. `propose_write(dry_run=True)` is the only path; calling with `dry_run=False` returns a clear error rather than executing.
 - **Multi-currency normalization beyond INR** — Indian D2C focus by design.
 - **A polished, production Next.js chat UI** — `POST /chat` works perfectly (returns rendered text + footnotes JSON), and the bundled `apps/chat-ui` is a thin shell over that endpoint that's enough to drive the demo. A dedicated run-log viewer with timeline scrubbing wasn't built; the run-log JSON is accessible via `/runs` and queryable from chat.
@@ -150,7 +177,7 @@ evals/              # 12 golden + 10 red-team + citation contract sanity tests
 docs/
   plans/            # design doc + implementation plan (the "why" + the "how")
   eval-honesty.md   # where it breaks
-tests/              # 223 tests mirroring packages/* paths
+tests/              # 227 tests mirroring packages/* paths
 ```
 
 ## What "running" looks like
@@ -160,7 +187,7 @@ tests/              # 223 tests mirroring packages/* paths
 2. Normalizer               → core.<entity>            (typed, with 9 provenance cols)
 3. Webhook ingress          → realtime queue → Agent runs → core.agent_runs
 4. Chat: planner → tools → semantic-layer SQL with citations → renderer → verifier → user
-5. Each step is testable in isolation (223 tests prove it).
+5. Each step is testable in isolation (227 tests prove it).
 ```
 
 ## Sources / prior art read for this design

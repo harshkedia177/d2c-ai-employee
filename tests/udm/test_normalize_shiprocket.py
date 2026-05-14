@@ -50,6 +50,52 @@ def test_shipment_order_canonical_id_matches_shopify_order_canonical_id():
     assert row["order_canonical_id"] == expected
 
 
+def test_real_api_payload_shape_derives_is_rto_from_status():
+    # Real /v1/external/orders has no is_rto boolean and uses `awb`, not `awb_code`.
+    rec = Record(
+        stream="shipments",
+        primary_key="sr-2",
+        payload={
+            "shipment_id": "sr-2",
+            "order_id": "shopify-m000-000456",
+            "awb": "AWB456",
+            "courier_name": "Bluedart",
+            "current_status": "RTO Initiated",
+            "shipped_date": "2026-05-10T00:00:00+00:00",
+            "delivered_date": "2026-05-13T00:00:00+00:00",
+        },
+        source_record_url="https://app.shiprocket.in/orders/sr-2",
+        fetched_at=datetime(2026, 5, 13, tzinfo=UTC),
+    )
+    row = shipment_from_shiprocket(rec, tenant_id="t1", raw_row_id=9)
+    assert row["is_rto"] is True
+    assert row["tracking_number"] == "AWB456"
+    assert row["rto_at"] == "2026-05-13T00:00:00+00:00"
+    assert row["delivered_at"] is None
+
+
+def test_real_api_payload_non_rto_status_returns_false():
+    rec = Record(
+        stream="shipments",
+        primary_key="sr-3",
+        payload={
+            "shipment_id": "sr-3",
+            "order_id": "shopify-m000-000789",
+            "awb": "AWB789",
+            "courier_name": "Delhivery",
+            "current_status": "DELIVERED",
+            "shipped_date": "2026-05-10T00:00:00+00:00",
+            "delivered_date": "2026-05-12T00:00:00+00:00",
+        },
+        source_record_url="https://app.shiprocket.in/orders/sr-3",
+        fetched_at=datetime(2026, 5, 12, tzinfo=UTC),
+    )
+    row = shipment_from_shiprocket(rec, tenant_id="t1", raw_row_id=10)
+    assert row["is_rto"] is False
+    assert row["delivered_at"] == "2026-05-12T00:00:00+00:00"
+    assert row["rto_at"] is None
+
+
 def test_shipment_provenance_columns_present():
     rec = Record(
         stream="shipments",

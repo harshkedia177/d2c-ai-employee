@@ -2,20 +2,35 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import hmac
 import json
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import text
 
+from packages.config import settings
 from packages.scaffolding.queues import enqueue
 from packages.warehouse.db import SessionLocal
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 WEBHOOK_INBOX_TABLE = "raw.shopify_webhook_inbox"
+
+
+def _verify_shopify_hmac(body: bytes, header_sig: str | None) -> None:
+    secret = settings.shopify_webhook_secret
+    if not secret:
+        return
+    if not header_sig:
+        raise HTTPException(status_code=401, detail="missing signature")
+    digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).digest()
+    expected = base64.b64encode(digest).decode("ascii")
+    if not hmac.compare_digest(expected, header_sig):
+        raise HTTPException(status_code=401, detail="invalid signature")
 
 
 @router.post("/shopify/{tenant_id}/{topic_a}/{topic_b}")
@@ -28,6 +43,7 @@ async def shopify_webhook(
     # Shopify topics like 'orders/create' arrive as two path segments; rejoin them.
     topic = f"{topic_a}/{topic_b}"
     body = await request.body()
+    _verify_shopify_hmac(body, request.headers.get("x-shopify-hmac-sha256"))
     payload = json.loads(body) if body else {}
     source_id = str(payload.get("id") or payload.get("admin_graphql_api_id") or "unknown")
 

@@ -192,22 +192,13 @@ async def main_async(tenant_id: str, reset: bool) -> None:
 
     await _ensure_tenant(tenant_id)
 
-    shopify_cfg = {
-        "base_url": settings.shopify_base_url,
-        "merchant": MERCHANT,
-        "shop_domain": f"{MERCHANT}.myshopify.com",
-    }
-    shiprocket_cfg = {
-        "base_url": settings.shiprocket_base_url,
-        "merchant": MERCHANT,
-        "email": "demo@shoppin.app",
-        "password": "demo",
-    }
-    meta_cfg = {
-        "base_url": settings.meta_base_url,
-        "ad_account": MERCHANT,
-        "access_token": "mock-meta-token",
-    }
+    shopify_cfg = settings.shopify_connector_config(merchant=MERCHANT)
+    shiprocket_cfg = settings.shiprocket_connector_config(merchant=MERCHANT)
+    meta_cfg = settings.meta_connector_config(merchant=MERCHANT)
+    log.info(
+        "connector modes: shopify=%s, shiprocket=%s, meta=%s",
+        shopify_cfg["mode"], shiprocket_cfg["mode"], meta_cfg["mode"],
+    )
 
     shopify_cfg["rate_limiter"] = TokenBucket.for_source_sync(
         redis_url=settings.redis_url,

@@ -24,7 +24,7 @@ class MetaAdsConnector:
         try:
             acquire(config)
             r = httpx.get(
-                f"{config['base_url']}/v19.0/act_{config['ad_account']}/campaigns",
+                f"{config['base_url']}/{config.get('api_version', 'v19.0')}/act_{config['ad_account']}/campaigns",
                 params={"access_token": config.get("access_token", "")},
                 timeout=5.0,
             )
@@ -62,7 +62,7 @@ class MetaAdsConnector:
             return
 
     def _read_campaigns(self, config: dict[str, Any]) -> Iterator[Record | Checkpoint]:
-        url = f"{config['base_url']}/v19.0/act_{config['ad_account']}/campaigns"
+        url = f"{config['base_url']}/{config.get('api_version', 'v19.0')}/act_{config['ad_account']}/campaigns"
         acquire(config)
         r = httpx.get(
             url,
@@ -70,6 +70,7 @@ class MetaAdsConnector:
             timeout=10.0,
         )
         r.raise_for_status()
+        now_ts = datetime.now(UTC)
         for c in r.json().get("data", []):
             yield Record(
                 stream="campaigns",
@@ -79,16 +80,18 @@ class MetaAdsConnector:
                     f"https://business.facebook.com/adsmanager/manage/campaigns?"
                     f"act={config['ad_account']}&selected_campaign_ids={c['id']}"
                 ),
-                fetched_at=datetime.now(UTC),
+                fetched_at=now_ts,
             )
 
     def _read_insights(
         self, config: dict[str, Any], state: dict[str, Any]
     ) -> Iterator[Record | Checkpoint]:
-        url = f"{config['base_url']}/v19.0/act_{config['ad_account']}/insights"
+        url = f"{config['base_url']}/{config.get('api_version', 'v19.0')}/act_{config['ad_account']}/insights"
         last_date = state.get("date_start") or ""
-        page = 0
         max_seen = last_date
+        # `after` is an opaque cursor for real Graph API (from paging.cursors.after);
+        # the mock_saas accepts an integer page index. Start unset; advance from response.
+        after: str | int = 0
 
         while True:
             acquire(config)
@@ -101,7 +104,7 @@ class MetaAdsConnector:
                         "spend,impressions,clicks,conversions,purchase_roas"
                     ),
                     "limit": 1000,
-                    "after": page,
+                    "after": after,
                 },
                 timeout=15.0,
             )
@@ -111,6 +114,7 @@ class MetaAdsConnector:
             if not data:
                 break
 
+            now_ts = datetime.now(UTC)
             for row in data:
                 if row["date_start"] <= last_date:
                     continue
@@ -123,13 +127,17 @@ class MetaAdsConnector:
                         f"https://business.facebook.com/adsmanager/manage/ads?"
                         f"act={config['ad_account']}&selected_ad_ids={row['ad_id']}"
                     ),
-                    fetched_at=datetime.now(UTC),
+                    fetched_at=now_ts,
                 )
                 if row["date_start"] > max_seen:
                     max_seen = row["date_start"]
 
             yield Checkpoint(stream="ad_insights", cursor={"date_start": max_seen})
 
-            if len(data) < 1000:
+            next_cursor = payload.get("paging", {}).get("cursors", {}).get("after")
+            if next_cursor:
+                after = next_cursor
+            elif len(data) < 1000:
                 break
-            page += 1
+            else:
+                after = (after if isinstance(after, int) else 0) + 1

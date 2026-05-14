@@ -9,6 +9,16 @@ from packages.udm.xref import canonical_id
 CONNECTOR_VERSION = "shiprocket@0.1.0"
 
 
+def _derive_is_rto(payload: dict[str, Any]) -> bool:
+    # Real Shiprocket /v1/external/orders has no `is_rto` boolean — RTO is
+    # encoded in `current_status` ("RTO Delivered", "RTO Initiated", ...).
+    # The mock keeps the boolean for back-compat; trust it when present.
+    if "is_rto" in payload:
+        return bool(payload["is_rto"])
+    status = (payload.get("current_status") or "").upper()
+    return "RTO" in status
+
+
 def shipment_from_shiprocket(
     record: Record,
     tenant_id: str,
@@ -17,13 +27,13 @@ def shipment_from_shiprocket(
 ) -> dict[str, Any]:
     p = record.payload
     src_order_id = shopify_order_id_for_xref or str(p["order_id"])
-    is_rto = bool(p.get("is_rto"))
+    is_rto = _derive_is_rto(p)
     return {
         "tenant_id": tenant_id,
         "canonical_id": canonical_id(tenant_id, "shipment", "shiprocket", record.primary_key),
         "order_canonical_id": canonical_id(tenant_id, "order", "shopify", src_order_id),
         "carrier": p.get("courier_name"),
-        "tracking_number": p.get("awb_code"),
+        "tracking_number": p.get("awb") or p.get("awb_code"),
         "status": p.get("current_status") or "unknown",
         "is_rto": is_rto,
         "freight_amount": (

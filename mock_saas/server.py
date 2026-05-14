@@ -36,9 +36,17 @@ def meta_insights(
     time_range: str | None = None,
     fields: str | None = None,
     limit: int = 1000,
+    after: str | None = None,
 ):
     rows = load(ad_account, "meta_insights")
-    return {"data": rows[:limit], "paging": {}}
+    start = int(after) if after and after.isdigit() else 0
+    page = rows[start : start + limit]
+    next_start = start + limit
+    has_more = next_start < len(rows)
+    # Real Graph API shape: {data, paging: {cursors: {before, after}}}.
+    # https://developers.facebook.com/docs/marketing-api/insights/
+    paging: dict = {"cursors": {"before": str(start), "after": str(next_start) if has_more else ""}}
+    return {"data": page, "paging": paging}
 
 
 @app.get("/meta/v19.0/act_{ad_account}/campaigns")

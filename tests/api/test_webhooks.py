@@ -1,3 +1,6 @@
+import base64
+import hashlib
+import hmac
 import time
 import uuid
 
@@ -6,6 +9,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
 from packages.api.main import app
+from packages.config import settings
 from packages.warehouse.db import SessionLocal
 
 
@@ -71,3 +75,37 @@ async def test_health_endpoint_returns_ok():
         r = await ac.get("/health")
     assert r.status_code == 200
     assert r.json() == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_shopify_webhook_hmac_pass(monkeypatch):
+    monkeypatch.setattr(settings, "shopify_webhook_secret", "test_secret")
+    tid = str(uuid.uuid4())
+    body = b'{"id":42,"total_price":"100"}'
+    sig = base64.b64encode(hmac.new(b"test_secret", body, hashlib.sha256).digest()).decode("ascii")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        r = await ac.post(
+            f"/webhooks/shopify/{tid}/orders/create",
+            content=body,
+            headers={"X-Shopify-Hmac-Sha256": sig, "Content-Type": "application/json"},
+        )
+    assert r.status_code == 200, r.text
+
+
+@pytest.mark.asyncio
+async def test_shopify_webhook_hmac_reject(monkeypatch):
+    monkeypatch.setattr(settings, "shopify_webhook_secret", "test_secret")
+    tid = str(uuid.uuid4())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        bad = await ac.post(
+            f"/webhooks/shopify/{tid}/orders/create",
+            content=b'{"id":42}',
+            headers={"X-Shopify-Hmac-Sha256": "obviously-wrong"},
+        )
+        missing = await ac.post(
+            f"/webhooks/shopify/{tid}/orders/create",
+            content=b'{"id":42}',
+        )
+    assert bad.status_code == 401
+    assert missing.status_code == 401

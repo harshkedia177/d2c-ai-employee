@@ -130,3 +130,62 @@ def test_read_unknown_stream_returns_empty():
     assert list(c.read("products", cfg, None)) == []
     assert list(c.read("customers", cfg, None)) == []
     assert list(c.read("line_items", cfg, None)) == []
+
+
+@respx.mock
+def test_real_mode_uses_shop_domain_and_admin_token_header():
+    route = respx.get("https://demo-store.myshopify.com/admin/api/2026-01/orders.json").mock(
+        return_value=httpx.Response(200, json={"orders": []})
+    )
+    c = ShopifyConnector()
+    cfg = {
+        "mode": "real",
+        "base_url": "https://demo-store.myshopify.com",
+        "shop_domain": "demo-store.myshopify.com",
+        "api_version": "2026-01",
+        "access_token": "shpat_test_token",
+    }
+    list(c.read("orders", cfg, state=None))
+    assert route.called
+    req = route.calls.last.request
+    assert req.headers["X-Shopify-Access-Token"] == "shpat_test_token"
+    assert "status=any" in str(req.url)
+
+
+@respx.mock
+def test_real_mode_follows_link_header_for_pagination():
+    page1 = httpx.Response(
+        200,
+        json={
+            "orders": [
+                {
+                    "id": 1,
+                    "updated_at": "2026-05-01T00:00:00Z",
+                    "total_price": "100",
+                    "line_items": [],
+                }
+            ]
+        },
+        headers={
+            "Link": (
+                '<https://demo-store.myshopify.com/admin/api/2026-01/'
+                'orders.json?page_info=abc&limit=250>; rel="next"'
+            )
+        },
+    )
+    page2 = httpx.Response(200, json={"orders": []})
+    route = respx.get(
+        "https://demo-store.myshopify.com/admin/api/2026-01/orders.json"
+    ).mock(side_effect=[page1, page2])
+
+    c = ShopifyConnector()
+    cfg = {
+        "mode": "real",
+        "base_url": "https://demo-store.myshopify.com",
+        "shop_domain": "demo-store.myshopify.com",
+        "api_version": "2026-01",
+        "access_token": "shpat_test_token",
+    }
+    list(c.read("orders", cfg, state=None))
+    assert route.call_count == 2
+    assert "page_info=abc" in str(route.calls[1].request.url)

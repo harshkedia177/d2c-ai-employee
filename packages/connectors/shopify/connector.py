@@ -12,8 +12,16 @@ from packages.connectors.base import (
     Record,
     StreamSpec,
     acquire,
+    is_real_mode,
 )
 from packages.connectors.shopify.schemas import SCHEMAS
+
+
+def _orders_url(config: dict[str, Any]) -> str:
+    version = config.get("api_version", "2026-01")
+    if is_real_mode(config):
+        return f"{config['base_url']}/admin/api/{version}/orders.json"
+    return f"{config['base_url']}/{config['merchant']}/admin/api/{version}/orders.json"
 
 
 class ShopifyConnector:
@@ -23,9 +31,15 @@ class ShopifyConnector:
     def check(self, config: dict[str, Any]) -> CheckResult:
         try:
             acquire(config)
+            headers = (
+                {"X-Shopify-Access-Token": config["access_token"]}
+                if is_real_mode(config)
+                else {}
+            )
             r = httpx.get(
-                f"{config['base_url']}/{config['merchant']}/admin/api/2026-01/orders.json",
+                _orders_url(config),
                 params={"limit": 1},
+                headers=headers,
                 timeout=5.0,
             )
             return CheckResult(ok=r.status_code == 200, message=str(r.status_code))
@@ -89,27 +103,33 @@ class ShopifyConnector:
         self, config: dict[str, Any], state: dict[str, Any]
     ) -> Iterator[Record | Checkpoint]:
         cursor = state.get("updated_at_min")
-        url = f"{config['base_url']}/{config['merchant']}/admin/api/2026-01/orders.json"
-        params: dict[str, Any] = {"limit": 250}
+        max_seen = cursor
+        real = is_real_mode(config)
+        shop_domain = config["shop_domain"]
+        headers = (
+            {"X-Shopify-Access-Token": config["access_token"]} if real else {}
+        )
+
+        next_url: str | None = _orders_url(config)
+        params: dict[str, Any] | None = {"limit": 250}
+        if real:
+            params["status"] = "any"
         if cursor:
             params["updated_at_min"] = cursor
-        max_seen = cursor
 
         seen_customer_ids: set[str] = set()
         seen_skus: set[str] = set()
 
-        while True:
+        while next_url:
             acquire(config)
-            r = httpx.get(url, params=params, timeout=10.0)
+            r = httpx.get(next_url, params=params, headers=headers, timeout=15.0)
             r.raise_for_status()
             orders = r.json().get("orders", [])
             if not orders:
                 break
 
+            now_ts = datetime.now(UTC)
             for o in orders:
-                now_ts = datetime.now(UTC)
-                shop_domain = config["shop_domain"]
-
                 yield Record(
                     stream="orders",
                     primary_key=str(o["id"]),
@@ -170,6 +190,11 @@ class ShopifyConnector:
 
             yield Checkpoint(stream="orders", cursor={"updated_at_min": max_seen})
 
+            if real:
+                next_url = r.links.get("next", {}).get("url")
+                params = None
+                continue
+
             if len(orders) < 250:
                 break
-            params["updated_at_min"] = max_seen
+            params = {"limit": 250, "updated_at_min": max_seen}

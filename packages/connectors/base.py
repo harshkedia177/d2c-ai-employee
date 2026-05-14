@@ -60,6 +60,10 @@ def acquire(config: dict[str, Any]) -> None:
         rl.acquire_sync()
 
 
+def is_real_mode(config: dict[str, Any]) -> bool:
+    return config.get("mode") == "real"
+
+
 @runtime_checkable
 class Connector(Protocol):
     source_system: str

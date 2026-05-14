@@ -61,14 +61,14 @@ The RTO agent is the hero of the system; it's also the one with the most operati
 These are conscious omissions, not oversights. Each one has a reason that's true at the scope of this submission.
 
 - **Marts (dbt-style aggregated tables).** Premature. Canonical plus on-demand SQL handles the current query latencies cleanly, and adding a marts layer before it actually hurts ends up freezing in place. Worth revisiting if and when chat P95 starts losing.
-- **Real OAuth flows** for any of the three connectors. Sandbox / synthetic credentials for this submission. The connector code targets prod by swapping `base_url`; the OAuth shim is a one-file addition that doesn't change anything else.
+- **Interactive OAuth (Partner Dashboard / Business Manager install flow).** Each connector authenticates with the platform's documented server-to-server credential — Shopify Custom App access token, Meta System User token, Shiprocket API user. The dual-mode `mock_saas → real API` switch is wired and exercised end to end. App-store-style OAuth (popup, scopes review, redirect URI handshake) is the missing piece if this were ever shipped as a multi-tenant Shopify App Store install; for an "AI employee" deployed per merchant the credential path is what production looks like.
 - **Auto-execution of writes.** The brief explicitly says no, and frankly it'd be reckless without per-merchant tuning anyway. `propose_write(dry_run=True)` is the only path; calling with `dry_run=False` returns a clear error rather than executing.
 - **Multi-currency normalization beyond INR.** Indian D2C is the focus, so the FX normalization layer would be theoretical work.
 - **A polished, production Next.js chat UI.** `POST /chat` works perfectly and the bundled `apps/chat-ui` is a thin shell over it — enough to drive the demo end to end, but not a full product surface. A dedicated run-log viewer with timeline scrubbing wasn't built; the run-log JSON is accessible via `/runs` and queryable from chat.
 
 ## Test counts (proof)
 
-223 pytest tests, all green. The breakdown below is approximate — the canonical number is whatever `uv run pytest -q` actually prints — but the shape is real. Note where the testing is heaviest: the chokepoint of the system (verifier + renderer + planner + eval harness) gets the most coverage, because that's where a regression hurts most.
+227 pytest tests, all green. The breakdown below is approximate — the canonical number is whatever `uv run pytest -q` actually prints — but the shape is real. Note where the testing is heaviest: the chokepoint of the system (verifier + renderer + planner + eval harness) gets the most coverage, because that's where a regression hurts most.
 
 - 3 warehouse migrations (partitioning + pgvector)
 - 7 connector contract (provenance mandatory)
