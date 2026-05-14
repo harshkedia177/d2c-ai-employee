@@ -210,25 +210,24 @@ async def _handle_connector_record(job: dict[str, Any]) -> None:
                 f"raw row not found: {raw_table} row_id={raw_row_id} tenant={tenant_id}"
             )
 
-    record = Record(
-        stream=stream,
-        primary_key=str(row.source_id),
-        payload=dict(row.payload),
-        source_record_url=row.source_record_url,
-        fetched_at=row.fetched_at,
-    )
+        record = Record(
+            stream=stream,
+            primary_key=str(row.source_id),
+            payload=dict(row.payload),
+            source_record_url=row.source_record_url,
+            fetched_at=row.fetched_at,
+        )
 
-    core_row = normalizer_fn(record, tenant_id, raw_row_id)
-    insert_sql = _CORE_INSERTS[entity]
+        core_row = normalizer_fn(record, tenant_id, raw_row_id)
+        insert_sql = _CORE_INSERTS[entity]
 
-    for field in _TIMESTAMP_FIELDS.get(entity, ()):
-        if field in core_row:
-            core_row[field] = _parse_ts(core_row[field])
+        for field in _TIMESTAMP_FIELDS.get(entity, ()):
+            if field in core_row:
+                core_row[field] = _parse_ts(core_row[field])
 
-    if entity == "ad_spend_daily" and isinstance(core_row.get("date"), str):
-        core_row["date"] = _date.fromisoformat(core_row["date"][:10])
+        if entity == "ad_spend_daily" and isinstance(core_row.get("date"), str):
+            core_row["date"] = _date.fromisoformat(core_row["date"][:10])
 
-    async with SessionLocal() as s:
         await s.execute(text(insert_sql), core_row)
         await s.commit()
 

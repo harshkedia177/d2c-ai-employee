@@ -151,9 +151,12 @@ async def _drain_one_connector(
     # line_items inline with orders), so route each by record.stream.
     state = await _load_state(tenant_id, connector.source_system, stream)
 
+    # Connectors use sync httpx; drain off-loop so concurrent drains overlap.
+    items = await asyncio.to_thread(lambda: list(connector.read(stream, config, state)))
+
     records_written = 0
     checkpoints = 0
-    for item in connector.read(stream, config, state):
+    for item in items:
         if isinstance(item, Record):
             key = (connector.source_system, item.stream)
             raw_table = RAW_TABLES.get(key)
@@ -222,22 +225,17 @@ async def main_async(tenant_id: str, reset: bool) -> None:
         source="meta_ads",
     )
 
-    # Pull in dependency order so cross-source joins resolve cleanly.
-    log.info("pulling shopify orders + line_items")
-    r, c = await _drain_one_connector(tenant_id, ShopifyConnector(), "orders", shopify_cfg)
-    log.info("  shopify: %d records, %d checkpoints", r, c)
-
-    log.info("pulling shiprocket shipments")
-    r, c = await _drain_one_connector(tenant_id, ShiprocketConnector(), "shipments", shiprocket_cfg)
-    log.info("  shiprocket: %d records, %d checkpoints", r, c)
-
-    log.info("pulling meta campaigns")
-    r, c = await _drain_one_connector(tenant_id, MetaAdsConnector(), "campaigns", meta_cfg)
-    log.info("  meta campaigns: %d records, %d checkpoints", r, c)
-
-    log.info("pulling meta ad_insights")
-    r, c = await _drain_one_connector(tenant_id, MetaAdsConnector(), "ad_insights", meta_cfg)
-    log.info("  meta ad_insights: %d records, %d checkpoints", r, c)
+    log.info("pulling shopify / shiprocket / meta in parallel")
+    results = await asyncio.gather(
+        _drain_one_connector(tenant_id, ShopifyConnector(), "orders", shopify_cfg),
+        _drain_one_connector(tenant_id, ShiprocketConnector(), "shipments", shiprocket_cfg),
+        _drain_one_connector(tenant_id, MetaAdsConnector(), "campaigns", meta_cfg),
+        _drain_one_connector(tenant_id, MetaAdsConnector(), "ad_insights", meta_cfg),
+    )
+    for name, (r, c) in zip(
+        ("shopify", "shiprocket", "meta campaigns", "meta ad_insights"), results, strict=True
+    ):
+        log.info("  %s: %d records, %d checkpoints", name, r, c)
 
     log.info("done")
 

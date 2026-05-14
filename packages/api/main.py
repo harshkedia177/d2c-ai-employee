@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,11 +13,21 @@ logging.basicConfig(
 )
 logging.getLogger("packages").setLevel(logging.INFO)
 
+from packages.api.chat_routes import _llm
 from packages.api.chat_routes import router as chat_router
 from packages.api.run_log_routes import router as runs_router
 from packages.api.webhook_routes import router as webhook_router
+from packages.config import settings
 
-app = FastAPI(title="d2c-ai-employee")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    if settings.gemini_api_key:
+        _llm()._ensure_client()
+    yield
+
+
+app = FastAPI(title="d2c-ai-employee", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

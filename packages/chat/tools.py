@@ -26,6 +26,9 @@ log = logging.getLogger(__name__)
 _QUERY_CACHE_MAX = 512
 _QUERY_CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
 
+_EXAMPLES_PATH = Path(__file__).parent.parent / "semantic_layer" / "examples.json"
+_EXAMPLES: list[dict[str, Any]] = json.loads(_EXAMPLES_PATH.read_text())
+
 # Tests may monkeypatch _get_embeddings_client to inject a fake.
 _embeddings_client: Any | None = None
 
@@ -124,14 +127,12 @@ async def search_examples(tenant_id: str, question: str, k: int = 5) -> dict[str
         except Exception as e:
             log.warning("embedding-based search failed: %s; falling back", e)
 
-    examples_path = Path(__file__).parent.parent / "semantic_layer" / "examples.json"
-    examples = json.loads(examples_path.read_text())
     qtokens = set(question.lower().split())
 
     def score(ex: dict) -> int:
         return len(qtokens & set(ex["question"].lower().split()))
 
-    ranked = sorted(examples, key=score, reverse=True)[:k]
+    ranked = sorted(_EXAMPLES, key=score, reverse=True)[:k]
     return {"examples": ranked, "retrieval": "substring_fallback"}
 
 
