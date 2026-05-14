@@ -6,7 +6,7 @@ from packages.chat.verifier import VerifierError, find_violations, verify_no_unc
 def test_passes_when_all_numerals_were_substituted():
     text = "GMV last week was ₹4,82,310 across 1,247 orders."
     substituted = frozenset({"₹4,82,310", "4,82,310", "1,247"})
-    verify_no_uncited_numerals(text, substituted)  # no raise
+    verify_no_uncited_numerals(text, substituted)
 
 
 def test_rejects_literal_numeral_not_from_substitution():
@@ -20,7 +20,6 @@ def test_rejects_estimate_phrasing_red_team():
     text = "Revenue was approximately ₹100,000 last month."
     with pytest.raises(VerifierError) as excinfo:
         verify_no_uncited_numerals(text, frozenset())
-    # at least one numeral caught
     assert excinfo.value.violations
 
 
@@ -42,16 +41,11 @@ def test_indian_comma_numerals_caught():
 
 
 def test_substituted_value_with_currency_symbol_matches_in_text():
-    """Renderer outputs ₹4,82,310. The text contains it. The numeral inside
-    (4,82,310) is reachable by the regex; that bare form must also be in
-    substituted_values. The renderer adds it; verifier catches its absence."""
     text = "₹4,82,310"
-    # only the formatted form is in the set; the bare numeral is NOT
     incomplete = frozenset({"₹4,82,310"})
     with pytest.raises(VerifierError):
         verify_no_uncited_numerals(text, incomplete)
 
-    # full set (renderer's actual behavior)
     complete = frozenset({"₹4,82,310", "4,82,310"})
     verify_no_uncited_numerals(text, complete)
 
@@ -71,8 +65,6 @@ def test_violation_includes_context():
 
 
 def test_red_team_dataset_minimal():
-    """Quick red-team: prompts that try to elicit estimates.
-    These rendered outputs MUST be rejected."""
     bad_outputs = [
         "Approximately 30% RTO rate this month.",
         "About ₹50,000 lost to RTO.",
@@ -86,7 +78,6 @@ def test_red_team_dataset_minimal():
 
 
 def test_combined_render_and_verify_round_trip():
-    """End-to-end: a draft is rendered, the rendered text passes verify."""
     from packages.chat.renderer import render
 
     draft = "GMV: {{m:gmv}}. Orders: {{m:cnt}}."
@@ -105,11 +96,9 @@ def test_combined_render_and_verify_round_trip():
 
 
 def test_combined_round_trip_catches_llm_typed_estimate():
-    """If the LLM ignores the rule and types a literal numeral alongside
-    placeholders, the verifier MUST still catch it."""
     from packages.chat.renderer import render
 
-    draft = "GMV is {{m:gmv}}, roughly 5 lakh."  # LLM cheated with literal '5'
+    draft = "GMV is {{m:gmv}}, roughly 5 lakh."
     metric_results = {
         "gmv": {
             "value": 482310,

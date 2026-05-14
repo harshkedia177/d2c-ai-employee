@@ -51,7 +51,6 @@ def test_make_run_log_carries_all_required_fields():
     assert log.band == "HIGH"
     assert log.proposed_action["dry_run"] is True
     assert log.cited_provenance[0]["raw_row_id"] == 1
-    # all required fields present
     assert log.run_id and log.tenant_id and log.triggered_at
 
 
@@ -89,7 +88,6 @@ async def test_write_run_log_persists_to_agent_runs():
 
 @pytest.mark.asyncio
 async def test_run_log_jsonb_columns_round_trip():
-    """Trigger/evidence/decision/cited_provenance go in as JSONB and come back as dicts."""
     tid = str(uuid.uuid4())
     ctx = AgentContext(
         tenant_id=tid,
@@ -123,7 +121,6 @@ async def test_run_log_jsonb_columns_round_trip():
         )
         row = r.first()
         assert row is not None
-        # trigger / evidence / decision / cited_provenance all came back as dicts
         assert row.trigger["pincode"] == "110084"
         assert row.evidence["features"]["pincode_rto_rate"] == 0.34
         assert row.decision["action_type"] == "downgrade_to_prepaid"

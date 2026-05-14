@@ -1,12 +1,3 @@
-"""End-to-end tests for the realtime queue worker.
-
-These tests insert real raw rows, enqueue real jobs, and verify the worker
-populates core.* and core.agent_runs correctly. No mocks — the whole point
-is to prove the production code path works.
-"""
-
-from __future__ import annotations
-
 import hashlib
 import json
 import uuid
@@ -17,13 +8,11 @@ from sqlalchemy import text
 
 from packages.ingestion.worker import process_one
 from packages.scaffolding.queues import enqueue
+from packages.udm.xref import canonical_id
 from packages.warehouse.db import SessionLocal
-
-# ---------- helpers ----------
 
 
 async def _insert_raw_shopify_order(tenant_id: str, payload: dict) -> int:
-    """Insert a row into raw.shopify_orders, return the row_id."""
     p_str = json.dumps(payload)
     p_hash = hashlib.sha256(p_str.encode()).hexdigest()
     async with SessionLocal() as s:
@@ -53,7 +42,6 @@ async def _insert_raw_shopify_order(tenant_id: str, payload: dict) -> int:
 
 
 async def _insert_raw_generic(table: str, tenant_id: str, source_id: str, payload: dict) -> int:
-    """Insert into any raw.* table that follows the standard provenance shape."""
     p_str = json.dumps(payload)
     p_hash = hashlib.sha256(p_str.encode()).hexdigest()
     async with SessionLocal() as s:
@@ -113,11 +101,8 @@ async def _insert_raw_webhook(tenant_id: str, payload: dict) -> int:
 async def _cleanup():
     yield
     # Scope cleanup strictly to test-only URL prefixes so we don't wipe
-    # demo data created by `make demo` (which uses the m000.myshopify.com
-    # shop_domain). Each test uses a fresh-UUID tenant_id, so rows from
-    # different runs don't collide.
+    # demo data created by `make demo`. Each test uses a fresh-UUID tenant_id.
     async with SessionLocal() as s:
-        # core.* rows produced by the test-only URL prefix
         for tbl in [
             'core."order"',
             "core.customer",
@@ -127,7 +112,6 @@ async def _cleanup():
             await s.execute(
                 text(f"DELETE FROM {tbl} WHERE source_record_url LIKE 'https://test.example.com/%'")
             )
-        # raw.* rows the helpers above inserted
         for tbl in [
             "raw.shopify_orders",
             "raw.shopify_customers",
@@ -146,13 +130,8 @@ async def _cleanup():
         await s.commit()
 
 
-# ---------- tests ----------
-
-
 @pytest.mark.asyncio
 async def test_connector_record_job_writes_to_core_order():
-    """The worker normalizes a Shopify order Record from raw and writes
-    a row to core.order with the canonical_id from xref."""
     tid = str(uuid.uuid4())
     order = {
         "id": 12345001,
@@ -186,8 +165,6 @@ async def test_connector_record_job_writes_to_core_order():
         },
     )
 
-    # Drain — may need to process other tests' jobs too; loop until ours runs.
-    # Identify ours by checking core.order.
     row = None
     for _ in range(50):
         await process_one()
@@ -216,7 +193,6 @@ async def test_connector_record_job_writes_to_core_order():
 
 @pytest.mark.asyncio
 async def test_shopify_webhook_job_runs_rto_flagger_for_cod_order():
-    """Worker handles a shopify_webhook job: loads from inbox, fires RTO Flagger."""
     tid = str(uuid.uuid4())
     order = {
         "id": 999001,
@@ -239,7 +215,6 @@ async def test_shopify_webhook_job_runs_rto_flagger_for_cod_order():
         },
     )
 
-    # Drain until our agent_run shows up.
     row = None
     for _ in range(50):
         await process_one()
@@ -264,11 +239,10 @@ async def test_shopify_webhook_job_runs_rto_flagger_for_cod_order():
 
 @pytest.mark.asyncio
 async def test_shopify_webhook_job_skips_non_cod_orders():
-    """Non-COD orders must be silently complete with no agent_runs row."""
     tid = str(uuid.uuid4())
     order = {
         "id": 999002,
-        "gateway": "razorpay",  # NOT COD
+        "gateway": "razorpay",
         "total_price": "2400",
         "shipping_address": {"zip": "110084"},
         "customer": {"id": 8},
@@ -286,7 +260,6 @@ async def test_shopify_webhook_job_skips_non_cod_orders():
             "source_id": str(order["id"]),
         },
     )
-    # Drain until the queue empties for this tenant.
     for _ in range(50):
         progressed = await process_one()
         if not progressed:
@@ -304,12 +277,8 @@ async def test_shopify_webhook_job_skips_non_cod_orders():
     assert count == 0
 
 
-# ---------- customer / product / refund round-trips ----------
-
-
 @pytest.mark.asyncio
 async def test_connector_record_job_writes_to_core_customer():
-    """Worker normalizes a Shopify customer Record and writes core.customer."""
     tid = str(uuid.uuid4())
     cust = {
         "id": 90001,
@@ -349,7 +318,6 @@ async def test_connector_record_job_writes_to_core_customer():
     assert row.country == "IN"
     assert row.raw_table == "raw.shopify_customers"
     assert row.raw_row_id == row_id
-    # email must be hashed, not plaintext
     assert row.email_hash != "x90001@example.com"
     assert len(row.email_hash) == 64
 
@@ -442,7 +410,4 @@ async def test_connector_record_job_writes_to_core_refund():
     assert row.reason == "damaged"
     assert row.raw_table == "raw.shopify_refunds"
     assert row.raw_row_id == row_id
-    # order_canonical_id must match xref for "12345678"
-    from packages.udm.xref import canonical_id
-
     assert str(row.order_canonical_id) == canonical_id(tid, "order", "shopify", "12345678")

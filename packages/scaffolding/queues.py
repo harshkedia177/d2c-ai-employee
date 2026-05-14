@@ -1,16 +1,4 @@
-"""Postgres-backed FIFO queues with SELECT FOR UPDATE SKIP LOCKED.
-
-Two named queues:
-- realtime: high priority — webhooks, agent triggers
-- backfill: low priority — initial merchant pull, daily catch-up
-
-Two queues so onboarding storms (200 merchants × backfill) cannot starve
-live webhooks. Each queue is a single Postgres table; workers compete
-via SKIP LOCKED so contention is row-level.
-
-v1 swap to SQS or Temporal is mechanical — same enqueue/dequeue/complete
-surface.
-"""
+"""Postgres-backed FIFO queues with SELECT FOR UPDATE SKIP LOCKED."""
 
 from __future__ import annotations
 
@@ -39,7 +27,6 @@ async def enqueue(
     kind: str,
     payload: dict[str, Any],
 ) -> int:
-    """Append a job. Returns the new job id."""
     table = _table(queue)
     async with SessionLocal() as s:
         row = await s.execute(
@@ -54,10 +41,6 @@ async def enqueue(
 
 
 async def dequeue(queue: str) -> dict | None:
-    """Atomically claim the oldest unstarted, uncompleted job.
-
-    Returns dict with id, tenant_id, kind, payload — or None if empty.
-    """
     table = _table(queue)
     async with SessionLocal() as s:
         row = await s.execute(
@@ -82,7 +65,6 @@ async def dequeue(queue: str) -> dict | None:
 
 
 async def complete(queue: str, job_id: int) -> None:
-    """Mark job done."""
     table = _table(queue)
     async with SessionLocal() as s:
         await s.execute(
@@ -93,7 +75,6 @@ async def complete(queue: str, job_id: int) -> None:
 
 
 async def fail(queue: str, job_id: int, error: str) -> None:
-    """Release a job back to the pool with the error recorded."""
     table = _table(queue)
     async with SessionLocal() as s:
         await s.execute(

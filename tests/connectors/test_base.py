@@ -34,7 +34,7 @@ def test_record_requires_fetched_at():
             primary_key="123",
             payload={"x": 1},
             source_record_url="https://shop.example.com/admin/orders/123",
-            fetched_at=None,  # type: ignore[arg-type]
+            fetched_at=None,
         )
 
 
@@ -47,12 +47,11 @@ def test_record_accepts_valid_provenance_and_computes_payload_hash():
         fetched_at=datetime.now(UTC),
     )
     assert r.payload_hash
-    assert len(r.payload_hash) == 64  # sha256 hex
-    # deterministic
+    assert len(r.payload_hash) == 64
     r2 = Record(
         stream="orders",
         primary_key="123",
-        payload={"y": "hello", "x": 1},  # different key order, same content
+        payload={"y": "hello", "x": 1},
         source_record_url="https://shop.example.com/admin/orders/123",
         fetched_at=r.fetched_at,
     )

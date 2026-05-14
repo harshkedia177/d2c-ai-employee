@@ -1,20 +1,17 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from packages.connectors.base import Record
 from packages.udm.normalize._provenance import provenance_columns
 from packages.udm.xref import canonical_id
-
-if TYPE_CHECKING:
-    from packages.connectors.base import Record
 
 CONNECTOR_VERSION = "meta_ads@0.1.0"
 
 
 def _extract_purchase_roas(payload: dict) -> float | None:
-    """Meta's insights endpoint returns purchase_roas as a list of action
-    dicts: [{"action_type": "purchase", "value": "2.1"}]. Pluck the
-    'purchase' entry and coerce to float."""
+    # Meta's insights endpoint returns purchase_roas as a list of action dicts:
+    # [{"action_type": "purchase", "value": "2.1"}]. Pluck the 'purchase' entry.
     roas_list = payload.get("purchase_roas") or []
     for entry in roas_list:
         if entry.get("action_type") == "purchase":

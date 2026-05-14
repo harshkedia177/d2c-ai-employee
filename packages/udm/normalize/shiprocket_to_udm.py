@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from packages.connectors.base import Record
 from packages.udm.normalize._provenance import provenance_columns
 from packages.udm.xref import canonical_id
-
-if TYPE_CHECKING:
-    from packages.connectors.base import Record
 
 CONNECTOR_VERSION = "shiprocket@0.1.0"
 
@@ -17,11 +15,6 @@ def shipment_from_shiprocket(
     raw_row_id: int,
     shopify_order_id_for_xref: str | None = None,
 ) -> dict[str, Any]:
-    """Normalize a Shiprocket shipment. Joins to canonical_order via the
-    Shopify order_id stored on the shipment payload (mock_saas seed sets
-    order_id = shopify-...-NNNNNN). If the source's order_id is the
-    Shopify-shape id directly, we use it; otherwise the caller passes
-    the Shopify id explicitly."""
     p = record.payload
     src_order_id = shopify_order_id_for_xref or str(p["order_id"])
     is_rto = bool(p.get("is_rto"))

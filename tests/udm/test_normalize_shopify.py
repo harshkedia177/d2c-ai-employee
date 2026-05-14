@@ -8,6 +8,7 @@ from packages.udm.normalize.shopify_to_udm import (
     product_from_shopify,
     refund_from_shopify,
 )
+from packages.udm.xref import canonical_id
 
 
 def _order_record():
@@ -44,7 +45,6 @@ def test_order_normalizes_to_canonical_with_provenance():
     assert row["gateway"] == "Cash on Delivery"
     assert row["shipping_pincode"] == "110084"
     assert row["utm_campaign"] == "camp-3"
-    # provenance — all 9 columns
     for col in [
         "source_system",
         "source_id",
@@ -66,10 +66,6 @@ def test_order_normalizes_to_canonical_with_provenance():
 
 
 def test_order_canonical_id_matches_xref_for_xref_join():
-    """Critical: shipment.order_canonical_id must equal order.canonical_id
-    so joins resolve. Both must use canonical_id(tenant, 'order', 'shopify', source_id)."""
-    from packages.udm.xref import canonical_id
-
     rec = _order_record()
     row = order_from_shopify(rec, tenant_id="t1", raw_row_id=42)
     expected = canonical_id("t1", "order", "shopify", "12345")
@@ -79,8 +75,6 @@ def test_order_canonical_id_matches_xref_for_xref_join():
 def test_order_customer_canonical_id_is_set_from_payload():
     rec = _order_record()
     row = order_from_shopify(rec, tenant_id="t1", raw_row_id=42)
-    from packages.udm.xref import canonical_id
-
     assert row["customer_canonical_id"] == canonical_id("t1", "customer", "shopify", "7")
 
 
@@ -93,8 +87,6 @@ def test_order_line_normalizes_with_correct_order_canonical_id():
         fetched_at=datetime(2026, 5, 1, tzinfo=UTC),
     )
     row = order_line_from_shopify(rec, tenant_id="t1", raw_row_id=99)
-    from packages.udm.xref import canonical_id
-
     assert row["order_canonical_id"] == canonical_id("t1", "order", "shopify", "12345")
     assert row["sku"] == "SKU-1"
     assert row["qty"] == 2
@@ -119,7 +111,7 @@ def test_customer_email_phone_hashed_not_plaintext():
     )
     row = customer_from_shopify(rec, tenant_id="t1", raw_row_id=1)
     assert row["email_hash"] != "abc@example.com"
-    assert len(row["email_hash"]) == 64  # sha256
+    assert len(row["email_hash"]) == 64
     assert len(row["phone_hash"]) == 64
     assert row["country"] == "IN"
 
@@ -133,8 +125,6 @@ def test_product_normalizes_with_sku_canonical_id():
         fetched_at=datetime(2026, 5, 1, tzinfo=UTC),
     )
     row = product_from_shopify(rec, tenant_id="t1", raw_row_id=5)
-    from packages.udm.xref import canonical_id
-
     assert row["canonical_id"] == canonical_id("t1", "product", "shopify", "SKU-7")
     assert row["sku"] == "SKU-7"
     assert row["title"] == "Cool Tee"
@@ -160,8 +150,6 @@ def test_refund_normalizes_with_order_canonical_id():
         fetched_at=datetime(2026, 5, 3, tzinfo=UTC),
     )
     row = refund_from_shopify(rec, tenant_id="t1", raw_row_id=11)
-    from packages.udm.xref import canonical_id
-
     assert row["canonical_id"] == canonical_id("t1", "refund", "shopify", "refund-12-1")
     assert row["order_canonical_id"] == canonical_id("t1", "order", "shopify", "12345")
     assert row["amount"] == 250.00

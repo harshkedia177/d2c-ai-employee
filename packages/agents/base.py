@@ -1,15 +1,4 @@
-"""Shared abstraction for autonomous agents.
-
-Mirrors the Connector pattern: one Protocol + three impls (RTO Risk
-Flagger, Meta Pauser, Pincode COD Blocker). Forcing all 3 agents through
-the same shape makes every agent declare trigger / evidence / decision /
-proposed_action / reasoning / expected_savings — exactly what the brief
-asks for ("trigger, data, decision, action, failure modes all explicit").
-
-Agents share the chat layer's tool surface (compute_metric, search_rows,
-propose_write) — so an agent's reasoning is automatically citation-grounded
-by the same provenance contract the chat uses. No second grounding system.
-"""
+"""Shared abstraction for autonomous agents."""
 
 from __future__ import annotations
 
@@ -17,6 +6,7 @@ import json
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any, Protocol
 
 from sqlalchemy import text
@@ -26,29 +16,19 @@ from packages.warehouse.db import SessionLocal
 
 @dataclass(frozen=True)
 class TriggerSpec:
-    """Either webhook or cron — every agent declares one."""
-
-    kind: str  # "webhook" | "cron"
-    topic: str | None = None  # for webhooks (e.g. "shopify.orders/create")
-    cron_expr: str | None = None  # for cron triggers
+    kind: str
+    topic: str | None = None
+    cron_expr: str | None = None
 
 
 @dataclass
 class Evidence:
-    """Inputs gathered from compute_metric / search_rows.
-
-    `citations` carries the provenance from each underlying tool call so
-    the run log shows traceable reasoning.
-    """
-
     features: dict[str, Any]
     citations: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
 class Decision:
-    """Pure function output of decide(). Never persists external state."""
-
     action_type: str
     payload: dict[str, Any]
     score: float
@@ -59,8 +39,6 @@ class Decision:
 
 @dataclass
 class AgentContext:
-    """What an agent needs to gather evidence."""
-
     tenant_id: str
     trigger_payload: dict[str, Any]
     triggered_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -68,8 +46,6 @@ class AgentContext:
 
 @dataclass
 class RunLog:
-    """One row of core.agent_runs."""
-
     run_id: str
     tenant_id: str
     agent_id: str
@@ -98,11 +74,7 @@ class Agent(Protocol):
     ) -> RunLog: ...
 
 
-# ---------- Persistence ----------
-
-
 async def write_run_log(log: RunLog) -> None:
-    """Append RunLog to core.agent_runs."""
     async with SessionLocal() as s:
         await s.execute(
             text("""
@@ -142,9 +114,6 @@ async def write_run_log(log: RunLog) -> None:
 
 
 def _json_default(o: Any) -> Any:
-    """Coerce dates/decimals for jsonb storage."""
-    from decimal import Decimal
-
     if isinstance(o, datetime):
         return o.isoformat()
     if isinstance(o, Decimal):
@@ -158,7 +127,6 @@ def make_run_log(
     evidence: Evidence,
     decision: Decision,
 ) -> RunLog:
-    """Helper: build a RunLog from the standard pieces."""
     return RunLog(
         run_id=str(uuid.uuid4()),
         tenant_id=ctx.tenant_id,

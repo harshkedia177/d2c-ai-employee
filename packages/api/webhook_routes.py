@@ -1,15 +1,4 @@
-"""Non-blocking webhook ingress.
-
-Pattern: validate (TODO: signature in v1), persist raw payload to inbox,
-enqueue a job, return 200. NEVER do scoring or RTO logic inline — that's
-what consumers + the realtime queue are for.
-
-Why this matters at scale: at BFCM peak, 200/sec sustained webhooks across
-10k merchants. A handler that does inline DB transactions + RTO scoring
-will time out, retry, and amplify the load. Sub-100ms ack with deferred
-processing is the production pattern (Stripe, Shopify, every payments
-provider).
-"""
+"""Non-blocking webhook ingress."""
 
 from __future__ import annotations
 
@@ -36,8 +25,7 @@ async def shopify_webhook(
     topic_b: str,
     request: Request,
 ) -> dict[str, Any]:
-    """Topic comes through as two segments because Shopify uses 'orders/create' style.
-    We rejoin them into the canonical 'orders/create' string."""
+    # Shopify topics like 'orders/create' arrive as two path segments; rejoin them.
     topic = f"{topic_a}/{topic_b}"
     body = await request.body()
     payload = json.loads(body) if body else {}

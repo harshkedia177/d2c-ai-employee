@@ -54,16 +54,14 @@ async def test_planner_runs_compute_metric_and_renders_with_citation():
 
     fake = FakeLLMClient(
         [
-            # turn 1: model calls compute_metric
             LLMResponse(tool_calls=[ToolCall("compute_metric", {"metric_id": "gmv"})]),
-            # turn 2: model emits final draft with placeholder
             LLMResponse(text="Your GMV is {{m:gmv_0}}."),
         ]
     )
 
     out = await chat_turn(tid, "what's my GMV?", fake)
     assert out["status"] == "ok"
-    assert "₹999.50" in out["text"]  # rendered INR formatted
+    assert "₹999.50" in out["text"]
     assert len(out["footnotes"]) == 1
     fn = out["footnotes"][0]
     assert fn["query_hash"]
@@ -77,11 +75,8 @@ async def test_planner_rejects_literal_numeral_then_retries():
 
     fake = FakeLLMClient(
         [
-            # turn 1: compute_metric tool call
             LLMResponse(tool_calls=[ToolCall("compute_metric", {"metric_id": "gmv"})]),
-            # turn 2: bad -- model types a literal numeral
             LLMResponse(text="GMV is {{m:gmv_0}}, roughly 5 lakh."),
-            # turn 3: corrected -- only placeholder
             LLMResponse(text="GMV is {{m:gmv_0}}."),
         ]
     )
@@ -89,7 +84,6 @@ async def test_planner_rejects_literal_numeral_then_retries():
     out = await chat_turn(tid, "GMV?", fake)
     assert out["status"] == "ok"
     assert "₹500" in out["text"]
-    # ensure planner saw three LLM turns
     assert len(fake.calls) == 3
 
 
@@ -98,19 +92,17 @@ async def test_planner_refuses_after_max_verifier_retries():
     tid = str(uuid.uuid4())
     await _seed_order(tid, 100.0)
 
-    # Model keeps cheating -- never restates correctly
     fake = FakeLLMClient(
         [
             LLMResponse(tool_calls=[ToolCall("compute_metric", {"metric_id": "gmv"})]),
             LLMResponse(text="GMV is {{m:gmv_0}}, about 5 lakh."),
             LLMResponse(text="Sure, around 5 lakh more or less."),
-            LLMResponse(text="Roughly 5 lakh."),  # 3rd offence
+            LLMResponse(text="Roughly 5 lakh."),
         ]
     )
 
     out = await chat_turn(tid, "GMV?", fake)
     assert out["status"] == "refused_verifier_exhausted"
-    # the safe fallback contains zero literal numerals
     from packages.chat.verifier import find_violations
 
     assert find_violations(out["text"], frozenset()) == []
@@ -122,23 +114,19 @@ async def test_planner_handles_tool_error_gracefully():
 
     fake = FakeLLMClient(
         [
-            # ask for an unknown metric -- tool raises ValueError
             LLMResponse(tool_calls=[ToolCall("compute_metric", {"metric_id": "made_up_metric"})]),
-            # planner should feed the error back; model gives up cleanly
             LLMResponse(text="I don't have that metric available."),
         ]
     )
 
     out = await chat_turn(tid, "made_up?", fake)
     assert out["status"] == "ok"
-    # answer has no numerals -- verifier passes
     assert out["text"] == "I don't have that metric available."
 
 
 @pytest.mark.asyncio
 async def test_planner_pct_format_for_rate_metrics():
     tid = str(uuid.uuid4())
-    # No order needed -- rto_rate over empty data returns None.
     fake = FakeLLMClient(
         [
             LLMResponse(tool_calls=[ToolCall("compute_metric", {"metric_id": "rto_rate"})]),
@@ -146,7 +134,6 @@ async def test_planner_pct_format_for_rate_metrics():
         ]
     )
     out = await chat_turn(tid, "rto rate?", fake)
-    # value will be None for empty data; renderer outputs "—%" or similar.
     assert out["status"] == "ok"
     assert "%" in out["text"] or "—" in out["text"]
 
@@ -165,9 +152,7 @@ async def test_planner_handles_no_tools_just_text():
 
 @pytest.mark.asyncio
 async def test_planner_exhausts_turns_if_model_loops():
-    """Defensive: model keeps calling tools forever."""
     tid = str(uuid.uuid4())
-    # 20 tool calls to exceed MAX_TURNS=8
     scripted = [
         LLMResponse(tool_calls=[ToolCall("compute_metric", {"metric_id": "gmv"})])
         for _ in range(20)

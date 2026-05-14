@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Iterator
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 
 import httpx
 
@@ -14,20 +15,15 @@ from packages.connectors.base import (
 )
 from packages.connectors.shiprocket.schemas import SCHEMAS
 
-if TYPE_CHECKING:
-    from collections.abc import Iterator
-
 
 class ShiprocketConnector:
     source_system = "shiprocket"
     connector_version = "shiprocket@0.1.0"
 
-    # class-level token cache: {merchant_id: (token, expires_at_unix)}
     _token_cache: ClassVar[dict[str, tuple[str, float]]] = {}
 
     def check(self, config: dict[str, Any]) -> CheckResult:
         try:
-            # _token() handles rate limiting via config["rate_limiter"]
             self._token(config)
             return CheckResult(ok=True)
         except Exception as e:
@@ -58,7 +54,6 @@ class ShiprocketConnector:
         )
         r.raise_for_status()
         data = r.json()
-        # API returns expires_in seconds (240h = 864000). Be defensive if missing.
         ttl = float(data.get("expires_in", 240 * 3600))
         self._token_cache[key] = (data["token"], time.time() + ttl)
         return data["token"]

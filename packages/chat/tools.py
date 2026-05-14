@@ -1,11 +1,5 @@
-"""The 7 chat tools.
-
-Every tool that returns a numerical value MUST also return a `provenance`
-field with `query_hash` (used by `get_provenance` to re-execute) plus
-`citations` array (source rows that produced the number). This is the
-chokepoint for the citation contract — no number leaves chat without a
-citation arrow.
-"""
+"""Chat tools. Every numerical-value tool returns a `provenance` field
+with `query_hash` and `citations` — the citation-contract chokepoint."""
 
 from __future__ import annotations
 
@@ -13,6 +7,7 @@ import contextlib
 import json
 import logging
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import text
@@ -26,19 +21,14 @@ from packages.warehouse.db import SessionLocal
 
 log = logging.getLogger(__name__)
 
-# In-memory query_hash → CompiledQuery store, used by get_provenance.
+# query_hash → CompiledQuery, used by get_provenance.
 _QUERY_CACHE: dict[str, dict[str, Any]] = {}
 
-# Lazy embeddings client. Tests can monkeypatch _get_embeddings_client.
+# Tests may monkeypatch _get_embeddings_client to inject a fake.
 _embeddings_client: Any | None = None
 
 
 def _get_embeddings_client() -> Any | None:
-    """Return a GeminiEmbeddings if GEMINI_API_KEY is set, else None.
-
-    Tests can monkeypatch this to inject FakeEmbeddings for deterministic
-    halfvec NN search without touching the network.
-    """
     global _embeddings_client
     if _embeddings_client is not None:
         return _embeddings_client
@@ -53,13 +43,9 @@ def _get_embeddings_client() -> Any | None:
 
 
 def _coerce_date_filter(filters: dict[str, Any]) -> dict[str, Any]:
-    """Convert ISO-string date values to datetime.date so asyncpg can bind them.
-
-    Filter keys ending in date-ish field names (placed_at, date, shipped_date,
-    delivered_date) get parsed if their value is a string of the right shape.
-    """
+    """Convert ISO-string date values to datetime.date so asyncpg can bind them."""
     out = dict(filters)
-    DATE_FIELDS = (  # noqa: N806 (constant-style local; matches spec)
+    DATE_FIELDS = (  # noqa: N806
         "placed_at",
         "shipped_at",
         "shipped_date",
@@ -77,7 +63,6 @@ def _coerce_date_filter(filters: dict[str, Any]) -> dict[str, Any]:
             continue
         field = k.split("__")[0]
         if field in DATE_FIELDS:
-            # Try date-only first ("YYYY-MM-DD"), then datetime.
             try:
                 out[k] = date.fromisoformat(v[:10])
             except ValueError:
@@ -87,32 +72,18 @@ def _coerce_date_filter(filters: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-# ---------- Tool 1: get_schema ----------
-
-
 async def get_schema(tenant_id: str, entity: str | None = None) -> dict[str, Any]:
-    """Return the semantic-layer entity definitions (metrics + dimensions).
-
-    Never returns raw DDL; that's deliberate so the LLM reasons about
-    business metrics, not column names.
-    """
     return {
         "metrics": list_metrics(),
         "dimensions": list_dimensions(),
     }
 
 
-# ---------- Tool 2: search_examples ----------
-
-
 async def search_examples(tenant_id: str, question: str, k: int = 5) -> dict[str, Any]:
     """Find curated (question, plan) examples similar to a question.
 
-    Primary path: embed the query via gemini-embedding-001 and run a
-    halfvec cosine NN against core.few_shot_examples (HNSW index).
-
-    Fallback (no API key OR table empty): naive substring overlap on
-    packages/semantic_layer/examples.json. Logged but does not error.
+    Primary: halfvec cosine NN against core.few_shot_examples (HNSW index).
+    Fallback (no API key OR empty table): substring overlap on examples.json.
     """
     client = _get_embeddings_client()
     if client is not None:
@@ -147,13 +118,9 @@ async def search_examples(tenant_id: str, question: str, k: int = 5) -> dict[str
                     ],
                     "retrieval": "halfvec_cosine_nn",
                 }
-            # Table empty → fallback
             log.info("few_shot_examples is empty; falling back to substring search")
         except Exception as e:
             log.warning("embedding-based search failed: %s; falling back", e)
-
-    # Fallback: substring overlap (the original implementation)
-    from pathlib import Path
 
     examples_path = Path(__file__).parent.parent / "semantic_layer" / "examples.json"
     examples = json.loads(examples_path.read_text())
@@ -166,9 +133,6 @@ async def search_examples(tenant_id: str, question: str, k: int = 5) -> dict[str
     return {"examples": ranked, "retrieval": "substring_fallback"}
 
 
-# ---------- Tool 3: compute_metric (THE chokepoint) ----------
-
-
 async def compute_metric(
     tenant_id: str,
     metric_id: str,
@@ -176,14 +140,9 @@ async def compute_metric(
     filters: dict[str, Any] | None = None,
     grain: str | None = None,
 ) -> dict[str, Any]:
-    """Compute a metric. Return {value | rows, provenance}.
-
-    - For 0-dim queries: returns `{value: number, provenance: {...}}`.
-    - For ≥1-dim queries: returns `{rows: [{<dims>, value, citations[]}], provenance: {...}}`.
-
-    `provenance.query_hash` is stored in _QUERY_CACHE and can be re-executed
-    via `get_provenance`.
-    """
+    """Compute a metric. Returns {value, provenance} for 0-dim or
+    {rows, provenance} for ≥1-dim. `provenance.query_hash` is cached
+    in _QUERY_CACHE and re-executable via get_provenance."""
     coerced = _coerce_date_filter(filters or {})
     cq = compile_metric(
         metric_id=metric_id,
@@ -205,7 +164,6 @@ async def compute_metric(
         rows = list(result.mappings())
 
     if not (dimensions or []):
-        # Single aggregate row.
         if not rows:
             return {
                 "value": None,
@@ -232,7 +190,6 @@ async def compute_metric(
             },
         }
 
-    # Per-dimension rows
     rendered_rows = []
     for r in rows:
         rendered_rows.append(
@@ -259,21 +216,14 @@ async def compute_metric(
     }
 
 
-# ---------- Tool 4: search_rows ----------
-
-
 async def search_rows(
     tenant_id: str,
     entity: str,
-    filter: dict[str, Any] | None = None,  # noqa: A002 (shadowing builtins.filter is intentional API surface)
+    filter: dict[str, Any] | None = None,  # noqa: A002
     limit: int = 20,
 ) -> dict[str, Any]:
-    """Inspect rows from a core.* table for qualitative grounding.
-
-    Allowlist of entities (NEVER let the LLM choose an arbitrary table):
-        order, shipment, refund, campaign, ad_spend_daily, agent_runs.
-    """
-    ALLOWED = {  # noqa: N806 (constant-style local; matches spec)
+    """Inspect rows from a core.* table. Allowlisted entities only."""
+    ALLOWED = {  # noqa: N806
         "order": 'core."order"',
         "shipment": "core.shipment",
         "refund": "core.refund",
@@ -321,9 +271,6 @@ async def search_rows(
     }
 
 
-# ---------- Tool 5: get_provenance ----------
-
-
 async def get_provenance(tenant_id: str, query_hash: str) -> dict[str, Any]:
     """Re-execute a previously compiled query (for footnote click-through)."""
     cached = _QUERY_CACHE.get(query_hash)
@@ -341,11 +288,8 @@ async def get_provenance(tenant_id: str, query_hash: str) -> dict[str, Any]:
     }
 
 
-# ---------- Tool 6: run_sql (escape hatch, off by default) ----------
-
-
 async def run_sql(tenant_id: str, sql: str, enable: bool = False) -> dict[str, Any]:
-    """Read-only escape hatch. Disabled by default for v0 safety."""
+    """Read-only SQL escape hatch. Disabled by default."""
     if not enable:
         return {
             "error": "run_sql disabled. Pass enable=True after operator review.",
@@ -361,24 +305,14 @@ async def run_sql(tenant_id: str, sql: str, enable: bool = False) -> dict[str, A
     return {"rows": rows, "row_count": len(rows)}
 
 
-# ---------- Tool 7: propose_write ----------
-
-
 async def propose_write(
     tenant_id: str,
     action_type: str,
     payload: dict[str, Any],
     dry_run: bool = True,
 ) -> dict[str, Any]:
-    """Stage an action. v0 NEVER executes — returns a structured diff.
-
-    Action types (for the 3 agents):
-      - downgrade_to_prepaid     (RTO Risk Flagger)
-      - pause_campaign           (Meta Pauser)
-      - block_cod_pincode        (Pincode COD Blocker)
-      - tag_order, create_segment, write_note (chat-driven actions)
-    """
-    KNOWN = {  # noqa: N806 (constant-style local; matches spec)
+    """Stage an action. Never executes — returns a structured diff."""
+    KNOWN = {  # noqa: N806
         "downgrade_to_prepaid",
         "pause_campaign",
         "block_cod_pincode",
@@ -393,7 +327,7 @@ async def propose_write(
         }
     if not dry_run:
         return {
-            "error": "v0 supports dry_run=True only. Real execution is v1.",
+            "error": "dry_run=True only in v0. Real execution arrives in v1.",
         }
     return {
         "dry_run": True,
@@ -403,8 +337,6 @@ async def propose_write(
         "summary": payload.get("summary") or f"would {action_type} with {payload}",
     }
 
-
-# ---------- Tool registry (used by planner + Gemini schema export) ----------
 
 TOOL_REGISTRY: dict[str, Any] = {
     "get_schema": get_schema,
@@ -502,7 +434,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "propose_write",
-        "description": ("Stage an action diff. v0 ALWAYS dry_run; never executes."),
+        "description": "Stage an action diff. Always dry_run; never executes.",
         "parameters": {
             "type": "object",
             "properties": {

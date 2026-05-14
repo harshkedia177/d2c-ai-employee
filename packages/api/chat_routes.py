@@ -1,12 +1,4 @@
-"""POST /chat — orchestrate one chat turn.
-
-Request:  {"tenant_id": str, "message": str}
-Response: {"text": str, "footnotes": list[dict], "status": str}
-
-For v0 returns a single JSON response. Streaming is sketched as v1 — the
-planner is already structured so we can adapt to SSE later (each tool call
-becomes an event, final draft becomes the done event).
-"""
+"""POST /chat — orchestrate one chat turn."""
 
 from __future__ import annotations
 

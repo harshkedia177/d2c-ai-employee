@@ -37,7 +37,6 @@ async def test_webhook_writes_to_inbox_and_enqueues_realtime_job():
     assert r.status_code == 200
     raw_row_id = r.json()["raw_row_id"]
 
-    # inbox row exists with our tenant + source_id
     async with SessionLocal() as s:
         inbox = await s.execute(
             text(
@@ -51,7 +50,6 @@ async def test_webhook_writes_to_inbox_and_enqueues_realtime_job():
         assert row.source_id == "12345"
         assert row.source_record_url == f"webhook://shopify/{tid}/orders/create/12345"
 
-        # realtime queue job was enqueued
         q = await s.execute(
             text(
                 "SELECT kind, payload FROM control.queue_realtime "

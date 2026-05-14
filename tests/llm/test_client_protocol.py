@@ -13,9 +13,8 @@ def test_llm_response_default_empty_tool_calls():
 def test_tool_call_immutable():
     t = ToolCall(name="compute_metric", arguments={"metric_id": "gmv"})
     assert t.name == "compute_metric"
-    # frozen dataclass — assignment raises FrozenInstanceError (AttributeError subclass)
     with pytest.raises(AttributeError):
-        t.name = "other"  # type: ignore[misc]
+        t.name = "other"
 
 
 def test_fake_client_implements_protocol():

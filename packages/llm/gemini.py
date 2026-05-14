@@ -1,14 +1,4 @@
-"""GeminiClient — thin wrapper around the google-genai SDK.
-
-Translates our OpenAI-style tool schemas into Gemini's
-function_declarations shape and parses function_calls back out of the
-response.
-
-Implicit caching is enabled by default for Gemini 2.5+ models. Our
-~12k-token system+tools+examples prefix clears the 2,048-token threshold
-for Pro and the 1,024-token threshold for Flash, so cache hits are
-automatic — no `cache_control` headers needed.
-"""
+"""GeminiClient — wrapper around the google-genai SDK."""
 
 from __future__ import annotations
 
@@ -19,11 +9,6 @@ from packages.llm.client import LLMResponse, ToolCall
 
 
 def _to_gemini_schema(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Convert OpenAI-style tool definitions to Gemini function_declarations.
-
-    Both formats use JSON Schema for `parameters`, so the conversion is mostly
-    field-name remapping.
-    """
     return [
         {
             "name": t["name"],
@@ -35,10 +20,6 @@ def _to_gemini_schema(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _to_gemini_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Map our dict shape to Gemini contents.
-
-    Roles: 'user' / 'model' / 'tool'. We use 'tool' to feed back tool results.
-    """
     out: list[dict[str, Any]] = []
     for m in messages:
         role = m.get("role", "user")
@@ -78,8 +59,7 @@ def _to_gemini_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 class GeminiClient:
     def __init__(self, api_key: str | None = None):
         self.api_key = api_key or settings.gemini_api_key
-        # Lazy-import the SDK so unit tests that don't actually call the API
-        # don't need google-genai installed at import time.
+        # Lazy-import so tests that don't call the API don't need google-genai installed.
         self._client = None
 
     def _ensure_client(self) -> Any:
@@ -109,8 +89,6 @@ class GeminiClient:
             config=config,
         )
 
-        # Parse: a Gemini response has candidates[0].content.parts which can
-        # contain {function_call: {name, args}} or {text: "..."}.
         text_parts: list[str] = []
         tool_calls: list[ToolCall] = []
         try:

@@ -32,8 +32,6 @@ def test_rto_shipment_sets_is_rto_and_rto_at():
 
 
 def test_shipment_order_canonical_id_matches_shopify_order_canonical_id():
-    """The crucial join: a shipment's order_canonical_id MUST equal the
-    canonical_id we computed for the corresponding Shopify order."""
     rec = Record(
         stream="shipments",
         primary_key="sr-1",

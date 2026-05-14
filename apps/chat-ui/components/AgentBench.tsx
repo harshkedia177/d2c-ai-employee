@@ -15,7 +15,6 @@ const FILTERS: Filter[] = [
 
 function inr(n: number | null | undefined): string {
   if (n == null) return "—";
-  // Indian-style grouping: 12,34,567 (lakh/crore).
   return "₹" + Math.round(n).toLocaleString("en-IN");
 }
 
@@ -82,7 +81,6 @@ function formatFeatureName(k: string): string {
 }
 
 function dotLeader(name: string, target: number): string {
-  // Reasonably typeset dot-leader, capped.
   const want = Math.max(2, target - name.length);
   return "·".repeat(want);
 }

@@ -29,8 +29,6 @@ def test_campaign_normalizes_with_provenance():
 
 
 def test_ad_spend_canonical_id_links_to_same_campaign_canonical_id():
-    """ad_spend_daily.campaign_canonical_id MUST match campaign.canonical_id
-    so the join works in chat queries like 'spend by campaign'."""
     rec = Record(
         stream="ad_insights",
         primary_key="ad-1:2026-05-01",
@@ -77,7 +75,7 @@ def test_ad_spend_daily_computes_revenue_attributed_from_roas():
     )
     row = ad_spend_daily_from_meta(rec, tenant_id="t1", raw_row_id=10)
     assert row["spend"] == 1000.0
-    assert row["revenue_attributed"] == 2500.0  # 1000 * 2.5
+    assert row["revenue_attributed"] == 2500.0
 
 
 def test_ad_spend_daily_revenue_attributed_none_when_roas_missing():

@@ -68,7 +68,6 @@ function TurnBlock({ turn, isMobile }: TurnBlockProps) {
           alignItems: "start",
         }}
       >
-        {/* Left: question + answer */}
         <div>
           <div
             className="eyebrow"
@@ -135,7 +134,6 @@ function TurnBlock({ turn, isMobile }: TurnBlockProps) {
                 onCiteClick={onCiteClick}
               />
 
-              {/* Mobile inline sidenotes */}
               {isMobile && footnotes.length > 0 && (
                 <div style={{ marginTop: "1rem" }}>
                   {footnotes.map((fn, i) => (
@@ -192,7 +190,6 @@ function TurnBlock({ turn, isMobile }: TurnBlockProps) {
           )}
         </div>
 
-        {/* Right: margin notes (desktop) */}
         {!isMobile && turn.response && footnotes.length > 0 && (
           <div style={{ position: "relative", minHeight: 1 }}>
             <Sidenotes
@@ -275,7 +272,6 @@ export function Conversation() {
         paddingBottom: "8rem",
       }}
     >
-      {/* When empty: show suggested prompts. */}
       {turns.length === 0 && (
         <section style={{ paddingBottom: "2rem" }}>
           <div
@@ -345,7 +341,6 @@ export function Conversation() {
         ))}
       </div>
 
-      {/* Composer */}
       <div
         style={{
           position: "sticky",

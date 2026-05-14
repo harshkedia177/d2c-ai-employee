@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import hashlib
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from packages.connectors.base import Record
 from packages.udm.normalize._provenance import provenance_columns
 from packages.udm.xref import canonical_id
-
-if TYPE_CHECKING:
-    from packages.connectors.base import Record
 
 CONNECTOR_VERSION = "shopify@0.1.0"
 
@@ -69,14 +67,13 @@ def order_line_from_shopify(
     tenant_id: str,
     raw_row_id: int,
 ) -> dict[str, Any]:
-    """record.stream must be 'line_items'. payload includes _order_id added by the connector."""
     p = record.payload
     order_src = str(p["_order_id"])
     return {
         "tenant_id": tenant_id,
         "order_canonical_id": canonical_id(tenant_id, "order", "shopify", order_src),
         "line_id": str(p["id"]),
-        "product_canonical_id": None,  # joined via SKU later
+        "product_canonical_id": None,
         "sku": p.get("sku"),
         "qty": int(p.get("quantity", 0)),
         "unit_price": float(p.get("price")) if p.get("price") else None,
@@ -120,11 +117,6 @@ def product_from_shopify(
     tenant_id: str,
     raw_row_id: int,
 ) -> dict[str, Any]:
-    """Normalize a synthetic Product Record derived from a line_item.
-
-    The Shopify connector emits a Product Record for each unique SKU it
-    encounters in line_items. The Record's payload carries {sku, title, price}.
-    """
     p = record.payload
     sku = str(p["sku"])
     return {
@@ -134,7 +126,7 @@ def product_from_shopify(
         "title": p.get("title"),
         "price": float(p["price"]) if p.get("price") else None,
         "currency": p.get("currency", "INR"),
-        "cost_per_item": None,  # not exposed by mock; v1 would fetch from Shopify Inventory API
+        "cost_per_item": None,
         "vendor": p.get("vendor"),
         **provenance_columns(
             record=record,
@@ -151,9 +143,6 @@ def refund_from_shopify(
     tenant_id: str,
     raw_row_id: int,
 ) -> dict[str, Any]:
-    """Normalize a Shopify refund. Payload carries {id, amount, reason, created_at}
-    plus ``_order_id`` appended by the connector before yielding.
-    """
     p = record.payload
     order_src = str(p["_order_id"])
     return {

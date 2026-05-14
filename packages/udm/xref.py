@@ -1,12 +1,4 @@
-"""Cross-reference: source-system primary key → canonical UUID.
-
-For v0, canonical_id is a deterministic UUIDv5 derived from
-(tenant_id, entity, source_system, source_id). This avoids a DB round-trip
-per record and makes joins reproducible across re-ingests.
-
-Tradeoff: changing the namespace below breaks all canonical_id continuity.
-Treat it as a versioned constant.
-"""
+"""Cross-reference: source-system primary key to canonical UUID."""
 
 from __future__ import annotations
 
@@ -23,6 +15,5 @@ def canonical_id(
     source_system: str,
     source_id: str,
 ) -> str:
-    """Stable UUIDv5 — same inputs → same output, forever."""
     name = f"{tenant_id}|{entity}|{source_system}|{source_id}"
     return str(uuid.uuid5(NAMESPACE, name))

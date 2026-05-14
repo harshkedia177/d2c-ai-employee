@@ -1,31 +1,17 @@
-"""Per-tenant per-source Redis token bucket.
-
-Why Redis Lua: rate-limit decisions must be atomic across worker processes.
-A read-then-write implementation lets two workers each acquire a token when
-only one was available. Lua scripts execute atomically inside Redis, so
-the check-and-decrement is a single critical section without external locks.
-
-At 10k merchants the bucket key is `bucket:{tenant_id}:{source}`, so the
-key cardinality is bounded at 10k × 5 sources = 50k. A single Redis node
-handles this comfortably.
-"""
+"""Per-tenant per-source Redis token bucket."""
 
 from __future__ import annotations
 
 import asyncio
 import time
-from typing import TYPE_CHECKING, ClassVar, cast
+from typing import ClassVar, cast
 
-import redis as _redis_pkg  # synchronous client
-import redis.asyncio as _redis_asyncio  # async client (separate connection pool)
+import redis as _redis_pkg
+import redis.asyncio as _redis_asyncio
+from redis import Redis as _SyncRedis
+from redis.asyncio import Redis as _AsyncRedis
 
-if TYPE_CHECKING:
-    from redis import Redis as _SyncRedis
-    from redis.asyncio import Redis as _AsyncRedis
-
-# Atomic acquire script.
-# Returns 0 if a token was acquired (call may proceed),
-# or the number of seconds to sleep before the next attempt.
+# Atomic acquire: returns 0 if a token was acquired, else seconds to wait.
 LUA = """
 local tokens = tonumber(redis.call('HGET', KEYS[1], 'tokens') or ARGV[1])
 local last = tonumber(redis.call('HGET', KEYS[1], 'ts') or ARGV[3])
@@ -43,7 +29,6 @@ else
 end
 """
 
-# Per-source default rates. Add more as needed.
 DEFAULT_RATES: dict[str, tuple[float, int]] = {
     # source: (refill_per_sec, capacity)
     "shopify": (2.0, 40),
@@ -62,12 +47,9 @@ class TokenBucket:
         refill_per_sec: float,
         capacity: int,
     ):
-        # Async client for asyncio code paths (worker, tests, FastAPI handlers).
+        # Both clients hit the same Redis hash so sync and async callers
+        # compete for tokens in the same bucket.
         self.r: _AsyncRedis = _redis_asyncio.from_url(redis_url, decode_responses=True)
-        # Sync client for code paths that aren't inside an event loop
-        # (e.g. connectors making httpx.get calls). Both clients hit the
-        # same Redis hash, so sync and async callers correctly compete for
-        # tokens in the same bucket.
         self.r_sync: _SyncRedis = _redis_pkg.from_url(redis_url, decode_responses=True)
         self.key = key
         self.refill = refill_per_sec
@@ -97,10 +79,7 @@ class TokenBucket:
         tenant_id: str,
         source: str,
     ) -> TokenBucket:
-        """Same as ``for_source`` but does not need to be awaited.
-
-        Use this from sync code paths (e.g. connectors making httpx calls).
-        """
+        """Sync version of ``for_source`` for non-async callers."""
         if source not in DEFAULT_RATES:
             raise ValueError(f"no default rate for source={source}")
         refill, capacity = DEFAULT_RATES[source]
@@ -120,7 +99,6 @@ class TokenBucket:
         return sha
 
     async def acquire(self) -> None:
-        """Block until a token is acquired."""
         sha = await self._ensure_script()
         while True:
             wait_raw = await self.r.evalsha(
@@ -137,15 +115,8 @@ class TokenBucket:
             await asyncio.sleep(min(wait, 5.0))
 
     def acquire_sync(self, max_wait_s: float = 30.0) -> None:
-        """Synchronous acquire. Blocks the calling thread until a token is
-        available or ``max_wait_s`` elapses.
-
-        Used by sync code paths (connectors' httpx.get calls). The async
-        ``acquire()`` above is for async callers. Both paths share the Lua
-        script via Redis' SHA1 cache; tokens come from the same Redis hash
-        so sync and async callers correctly compete for the same bucket.
-        """
-        sha = cast("str", self.r_sync.script_load(LUA))  # idempotent; Redis dedupes by SHA1
+        """Blocking acquire for sync callers; raises TimeoutError after max_wait_s."""
+        sha = cast("str", self.r_sync.script_load(LUA))
         deadline = time.time() + max_wait_s
         while True:
             wait_raw = self.r_sync.evalsha(
@@ -164,7 +135,6 @@ class TokenBucket:
             time.sleep(min(wait, 5.0))
 
     async def reset(self) -> None:
-        """Drop the bucket state (test helper)."""
         await self.r.delete(self.key)
 
     async def close(self) -> None:

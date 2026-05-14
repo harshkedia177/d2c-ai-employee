@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import httpx
 
@@ -12,9 +13,6 @@ from packages.connectors.base import (
     StreamSpec,
 )
 from packages.connectors.shopify.schemas import SCHEMAS
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
 
 
 class ShopifyConnector:
@@ -84,10 +82,8 @@ class ShopifyConnector:
         if stream == "orders":
             yield from self._read_orders(config, state or {})
         elif stream == "line_items":
-            # line_items are emitted while reading orders; standalone read is a no-op.
             return
         else:
-            # other streams not yet implemented for v0
             return
 
     def _read_orders(
@@ -100,9 +96,6 @@ class ShopifyConnector:
             params["updated_at_min"] = cursor
         max_seen = cursor
 
-        # Dedupe customers + products within a single connector run; this
-        # keeps the volume of emitted Records bounded by unique customer ids
-        # / SKUs rather than order count.
         seen_customer_ids: set[str] = set()
         seen_skus: set[str] = set()
 
@@ -128,7 +121,6 @@ class ShopifyConnector:
                     fetched_at=now_ts,
                 )
 
-                # Customer (embedded in order; emit once per unique id this run)
                 cust = o.get("customer") or {}
                 cust_id = cust.get("id")
                 if cust_id is not None and str(cust_id) not in seen_customer_ids:
@@ -141,7 +133,6 @@ class ShopifyConnector:
                         fetched_at=now_ts,
                     )
 
-                # Line items + Products (one product Record per unique SKU this run)
                 for li in o.get("line_items", []):
                     yield Record(
                         stream="line_items",
@@ -166,7 +157,6 @@ class ShopifyConnector:
                             fetched_at=now_ts,
                         )
 
-                # Refunds (one Record per refund in order.refunds)
                 for ref in o.get("refunds", []) or []:
                     yield Record(
                         stream="refunds",

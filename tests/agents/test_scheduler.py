@@ -1,8 +1,3 @@
-"""Tests for the cron scheduler — proves SQL → trigger_payload → agent flow
-works against real core.* rows."""
-
-from __future__ import annotations
-
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -148,12 +143,8 @@ async def _insert_ad_spend(
 
 @pytest.fixture
 async def _scheduler_cleanup():
-    """No-op fixture kept for API compatibility.
-
-    Each test uses a fresh-UUID tenant_id, so rows from different test runs
-    don't collide. We intentionally do NOT delete here — that previously
-    wiped demo data and made `make demo` non-idempotent across test runs.
-    """
+    # No-op: each test uses a fresh-UUID tenant_id, so rows don't collide.
+    # Avoid deleting here so `make demo` data stays intact across runs.
     created: list[str] = []
     yield created
 
@@ -165,17 +156,15 @@ async def test_pincode_blocker_flags_high_rto_pincode_and_skips_clean(
     tid = str(uuid.uuid4())
     _scheduler_cleanup.append(tid)
 
-    # 25 orders in HIGH-RTO pincode 110084 with 33% RTO
     high_orders = [str(uuid.uuid4()) for _ in range(25)]
     for i, oid in enumerate(high_orders):
         await _insert_order(tid, oid, "110084", 2400.0)
-        await _insert_shipment(tid, oid, is_rto=(i % 3 == 0))  # ~33%
+        await _insert_shipment(tid, oid, is_rto=(i % 3 == 0))
 
-    # 25 orders in LOW-RTO pincode 560001 with 4% RTO
     low_orders = [str(uuid.uuid4()) for _ in range(25)]
     for i, oid in enumerate(low_orders):
         await _insert_order(tid, oid, "560001", 2400.0)
-        await _insert_shipment(tid, oid, is_rto=(i == 0))  # 4%
+        await _insert_shipment(tid, oid, is_rto=(i == 0))
 
     run = await run_pincode_blocker_for_tenant(tid, window_days=90, min_orders=20)
 
@@ -191,17 +180,14 @@ async def test_meta_pauser_pauses_low_post_rto_roas_campaign(_scheduler_cleanup)
     tid = str(uuid.uuid4())
     _scheduler_cleanup.append(tid)
 
-    # Campaign A: ₹10k spend, ₹4k attributed revenue → ROAS 0.4 → PAUSE
     cid_a = str(uuid.uuid4())
     await _insert_campaign(tid, cid_a, "Bad Campaign")
     await _insert_ad_spend(tid, cid_a, "ad-a-1", spend=10_000, conversions=80)
-    # 4 orders × ₹1k attributed via utm_campaign join
     for _ in range(4):
         oid = str(uuid.uuid4())
         await _insert_order(tid, oid, "560001", 1000.0, utm_campaign="Bad Campaign")
         await _insert_shipment(tid, oid, is_rto=False)
 
-    # Campaign B: healthy
     cid_b = str(uuid.uuid4())
     await _insert_campaign(tid, cid_b, "Good Campaign")
     await _insert_ad_spend(tid, cid_b, "ad-b-1", spend=5_000, conversions=200)
@@ -215,5 +201,5 @@ async def test_meta_pauser_pauses_low_post_rto_roas_campaign(_scheduler_cleanup)
     proposals = run.proposed_action["payload"]["proposals"]
     actions_by_name = {p["name"]: p["action"] for p in proposals}
     assert actions_by_name.get("Bad Campaign") == "pause_campaign"
-    assert "Good Campaign" not in actions_by_name  # only proposes for non-keep cases
-    assert run.band == "HIGH"  # at least one pause → HIGH
+    assert "Good Campaign" not in actions_by_name
+    assert run.band == "HIGH"

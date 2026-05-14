@@ -21,7 +21,6 @@ def test_should_not_block_below_min_sample():
 
 
 def test_should_block_when_expected_loss_exceeds_half_margin():
-    # rto 33% × (2000×0.7 + 240) = 0.33 × 1640 = 541; half-margin = 0.5×600 = 300; 541 > 300 → block
     p = PincodeStat(pincode="110084", rto_rate=0.33, sample_size=87, avg_cart_value=2000)
     assert _should_block(p, DEFAULT_MARGIN_PCT) is True
 
@@ -34,11 +33,9 @@ def test_should_not_block_when_low_rto():
 def test_decide_returns_top_n_ranked_by_expected_loss():
     blocker = PincodeCodBlocker()
     pincodes = [
-        # bad ones
         dict(pincode=f"BAD-{i}", rto_rate=0.4 + i * 0.01, sample_size=50, avg_cart_value=2000)
         for i in range(25)
     ] + [
-        # good ones
         dict(pincode=f"GOOD-{i}", rto_rate=0.05, sample_size=100, avg_cart_value=2000)
         for i in range(5)
     ]
@@ -46,8 +43,7 @@ def test_decide_returns_top_n_ranked_by_expected_loss():
     d = blocker.decide(ev)
     assert d.band == "HIGH"
     proposals = d.payload["proposals"]
-    assert len(proposals) == TOP_N  # capped at 20
-    # ranked by expected_loss desc → highest rto first
+    assert len(proposals) == TOP_N
     rates = [p["rto_rate"] for p in proposals]
     assert rates == sorted(rates, reverse=True)
 
@@ -67,7 +63,7 @@ def test_decide_skips_undersample_pincodes():
     pincodes = [
         dict(
             pincode="UNDER", rto_rate=0.99, sample_size=MIN_SAMPLE_SIZE - 1, avg_cart_value=2000
-        ),  # extreme but undersampled — must skip
+        ),
     ]
     d = blocker.decide(Evidence(features={"pincode_stats": pincodes}, citations=[]))
     assert d.payload["proposals"] == []

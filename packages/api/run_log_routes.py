@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Query
 from sqlalchemy import text
 
+from packages.semantic_layer.compiler import list_dimensions, list_metrics
 from packages.warehouse.db import SessionLocal
 
 router = APIRouter(tags=["runs"])
@@ -33,7 +34,6 @@ async def list_runs(
     async with SessionLocal() as s:
         result = await s.execute(text(sql), params)
         rows = [dict(r) for r in result.mappings()]
-    # Coerce non-JSON-native types to strings/floats.
     for r in rows:
         if r.get("run_id") is not None:
             r["run_id"] = str(r["run_id"])
@@ -48,9 +48,6 @@ async def list_runs(
 
 @router.get("/metrics")
 async def list_all_metrics() -> dict[str, Any]:
-    """Return the semantic layer's metrics + dimensions for the /metrics UI page."""
-    from packages.semantic_layer.compiler import list_dimensions, list_metrics
-
     return {
         "metrics": list_metrics(),
         "dimensions": list_dimensions(),

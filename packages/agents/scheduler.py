@@ -1,13 +1,4 @@
-"""Production-style cron handlers for the batch agents.
-
-The MetaPauser and PincodeCodBlocker were designed to receive pre-computed
-batches in ctx.trigger_payload. This module is the SQL → trigger_payload
-adapter — it queries core.* to assemble what each agent expects, then
-invokes agent.gather / decide / propose.
-
-In v1 these functions get called by a real scheduler (Celery beat, k8s
-CronJob). For now scripts/run_demo.py calls them once after ingest drains.
-"""
+"""Cron handlers for the batch agents."""
 
 from __future__ import annotations
 
@@ -29,7 +20,6 @@ async def run_pincode_blocker_for_tenant(
     window_days: int = 90,
     min_orders: int = 20,
 ) -> RunLog:
-    """Aggregate pincode stats from core, then run PincodeCodBlocker."""
     since = datetime.now(UTC) - timedelta(days=window_days)
 
     async with SessionLocal() as s:
@@ -92,7 +82,6 @@ async def run_meta_pauser_for_tenant(
     tenant_id: str,
     window_days: int = 14,
 ) -> RunLog:
-    """Aggregate campaign performance from core, then run MetaPauser."""
     since_date = (datetime.now(UTC) - timedelta(days=window_days)).date()
 
     async with SessionLocal() as s:
@@ -149,8 +138,6 @@ async def run_meta_pauser_for_tenant(
             "attributed_revenue": float(r["attributed_revenue"] or 0),
             "rto_adjusted_revenue": float(r["rto_adjusted_revenue"] or 0),
             "conversions": int(r["conversions"] or 0),
-            # Treat any campaign with <50 conversions in the window as still
-            # in learning phase (per MetaPauser's LEARNING_PHASE_MIN_CONVERSIONS).
             "learning_phase": int(r["conversions"] or 0) < 50,
         }
         for r in rows

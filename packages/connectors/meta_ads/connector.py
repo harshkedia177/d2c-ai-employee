@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import httpx
 
@@ -12,9 +13,6 @@ from packages.connectors.base import (
     StreamSpec,
 )
 from packages.connectors.meta_ads.schemas import SCHEMAS
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
 
 
 class MetaAdsConnector:
@@ -95,7 +93,6 @@ class MetaAdsConnector:
         page = 0
         max_seen = last_date
 
-        # paging via offset (simplified for v0; real Meta uses cursor-paged response)
         while True:
             rl = config.get("rate_limiter")
             if rl is not None:
@@ -138,7 +135,6 @@ class MetaAdsConnector:
 
             yield Checkpoint(stream="ad_insights", cursor={"date_start": max_seen})
 
-            # mock_saas server doesn't actually page; break if we got under limit
             if len(data) < 1000:
                 break
             page += 1

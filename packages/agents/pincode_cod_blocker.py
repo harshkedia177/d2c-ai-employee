@@ -1,13 +1,4 @@
-"""Pincode COD Block Recommender — daily 3am IST.
-
-Aggregates 90d shipment data by pincode and ranks pincodes where blocking
-COD would save more than half the average margin per order. Hard gate
-on n>=20 per pincode (volatile rates below this — see RTO research).
-
-Strategic, not tactical: founder reviews weekly, not daily-acts. Returns
-top-20 ranked candidates so they can pick the worst offenders without
-overwhelming the queue.
-"""
+"""Pincode COD Block Recommender."""
 
 from __future__ import annotations
 
@@ -24,8 +15,8 @@ from packages.agents.base import (
 )
 
 MIN_SAMPLE_SIZE = 20
-DEFAULT_MARGIN_PCT = 0.30  # ~30% gross margin assumption
-DEFAULT_FREIGHT_INR = 240.0  # forward + reverse leg estimate
+DEFAULT_MARGIN_PCT = 0.30
+DEFAULT_FREIGHT_INR = 240.0
 TOP_N = 20
 
 
@@ -38,7 +29,6 @@ class PincodeStat:
 
 
 def _expected_loss_per_order(p: PincodeStat, margin_pct: float) -> float:
-    """E[loss] = rto_rate × (cart × (1-margin) + freight)."""
     loss_if_rto = p.avg_cart_value * (1 - margin_pct) + DEFAULT_FREIGHT_INR
     return p.rto_rate * loss_if_rto
 
@@ -67,7 +57,6 @@ class PincodeCodBlocker:
     def decide(self, evidence: Evidence) -> Decision:
         margin_pct = float(evidence.features.get("margin_pct", DEFAULT_MARGIN_PCT))
         stats = [PincodeStat(**s) for s in evidence.features.get("pincode_stats", [])]
-        # Filter, rank, top-N
         candidates = [s for s in stats if _should_block(s, margin_pct)]
         candidates.sort(
             key=lambda p: _expected_loss_per_order(p, margin_pct),

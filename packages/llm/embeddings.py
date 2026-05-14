@@ -1,12 +1,9 @@
-"""Embeddings abstraction. Mirrors LLMClient — pluggable so tests inject
-a deterministic fake while production uses gemini-embedding-001.
-
-Output dimensionality is fixed at 3072 to match core.few_shot_examples.embedding
-(halfvec(3072) with HNSW cosine index).
-"""
+"""Embeddings abstraction."""
 
 from __future__ import annotations
 
+import hashlib
+import random
 from typing import Any, Protocol
 
 from packages.config import settings
@@ -37,24 +34,16 @@ class GeminiEmbeddings:
             contents=text,
             config={"output_dimensionality": EMBEDDING_DIM},
         )
-        # result.embeddings is a list; we sent one string so take [0].
         return list(result.embeddings[0].values)
 
 
 class FakeEmbeddings:
-    """Deterministic test embeddings: returns a fixed-length vector seeded
-    by a hash of the input text. Same text → same vector."""
-
     def __init__(self, dim: int = EMBEDDING_DIM):
         self.dim = dim
         self.calls: list[str] = []
 
     async def embed(self, text: str) -> list[float]:
         self.calls.append(text)
-        import hashlib
-        import random
-
         seed = int(hashlib.sha256(text.encode()).hexdigest()[:16], 16)
         rng = random.Random(seed)
-        # uniform in [-1, 1]; tests just need determinism + distinct vectors
         return [rng.uniform(-1.0, 1.0) for _ in range(self.dim)]

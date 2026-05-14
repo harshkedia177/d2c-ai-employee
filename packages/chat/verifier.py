@@ -1,26 +1,14 @@
-"""Regex-based literal-numeral verifier — the citation contract teeth.
-
-Any numeral in the rendered text that wasn't injected by the renderer
-fails verification. The planner must retry with stricter prompting.
-
-The regex is deliberately broad: it catches integers, decimals, and
-Indian-style comma-grouped numbers (e.g. '4,82,310'). It will produce a
-false positive if the rendered text legitimately contains a non-metric
-numeral (e.g. 'Q3 2026', '5-star review'). The contract trades off some
-LLM friction for zero hallucinated numerical claims — that's the whole
-point. We accept the friction.
-"""
+"""Regex-based literal-numeral verifier enforcing the citation contract."""
 
 from __future__ import annotations
 
 import re
 
+# Matches integers, decimals, and Indian-style comma-grouped numbers ('4,82,310').
 NUMERAL_RE = re.compile(r"\b\d[\d,]*(?:\.\d+)?\b")
 
 
 class VerifierError(ValueError):
-    """Raised when rendered text contains a numeral not produced by render()."""
-
     def __init__(self, numeral: str, offset: int, context: str, all_violations: list[dict]):
         super().__init__(
             f"Uncited numeral '{numeral}' at offset {offset}. "
@@ -33,10 +21,7 @@ class VerifierError(ValueError):
 
 
 def verify_no_uncited_numerals(text: str, substituted_values: frozenset[str] | set[str]) -> None:
-    """Raise VerifierError if any literal numeral isn't in substituted_values.
-
-    This is the only place where text from the LLM is admitted to the user.
-    """
+    """Raise VerifierError if any literal numeral isn't in substituted_values."""
     violations: list[dict] = []
     for m in NUMERAL_RE.finditer(text):
         n = m.group()
@@ -59,10 +44,7 @@ def verify_no_uncited_numerals(text: str, substituted_values: frozenset[str] | s
 
 
 def find_violations(text: str, substituted_values: frozenset[str] | set[str]) -> list[dict]:
-    """Non-raising variant — returns a list of violations (empty if clean).
-
-    Useful for the planner's reject-and-retry loop and for evals.
-    """
+    """Non-raising variant — returns a list of violations (empty if clean)."""
     out: list[dict] = []
     for m in NUMERAL_RE.finditer(text):
         n = m.group()

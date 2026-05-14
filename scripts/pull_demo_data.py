@@ -1,16 +1,4 @@
-"""One-shot batch pull: runs each connector against mock_saas, writes Records
-to the appropriate raw.* table, and enqueues a `connector_record` job for the
-worker to normalize and write to core.
-
-Same write-then-enqueue pattern as the production webhook route — no new
-abstraction. The worker handles normalize → core write.
-
-Idempotency: raw is append-only (re-runs duplicate raw rows but core has
-ON CONFLICT DO NOTHING). Use --reset to TRUNCATE the tenant's raw data first.
-
-Usage:
-  uv run python scripts/pull_demo_data.py [--tenant=UUID] [--reset]
-"""
+"""Batch pull: runs each connector against mock_saas, writes raw rows, enqueues normalize jobs."""
 
 from __future__ import annotations
 
@@ -23,7 +11,6 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-# Ensure the repo root is on sys.path so `import packages.*` works when run as a script.
 _ROOT_FOR_IMPORT = Path(__file__).parent.parent
 if str(_ROOT_FOR_IMPORT) not in sys.path:
     sys.path.insert(0, str(_ROOT_FOR_IMPORT))
@@ -45,7 +32,6 @@ DEMO_TENANT_ID = "00000000-0000-0000-0000-000000000001"
 DEMO_SLUG = "demo"
 MERCHANT = "m000"
 
-# (source_system, stream) → raw table name
 RAW_TABLES = {
     ("shopify", "orders"): "raw.shopify_orders",
     ("shopify", "line_items"): "raw.shopify_line_items",
@@ -71,7 +57,6 @@ async def _ensure_tenant(tenant_id: str) -> None:
 
 
 async def _truncate_tenant_data(tenant_id: str) -> None:
-    """Drop all raw + core + agent_runs rows for this tenant. Used by --reset."""
     async with SessionLocal() as s:
         for tbl in RAW_TABLES.values():
             await s.execute(text(f"DELETE FROM {tbl} WHERE tenant_id = :t"), {"t": tenant_id})
@@ -100,7 +85,6 @@ async def _truncate_tenant_data(tenant_id: str) -> None:
 
 
 async def _insert_raw(table: str, tenant_id: str, record: Record, connector_version: str) -> int:
-    """Insert one Record into the raw table. Returns the new row_id."""
     payload_str = json.dumps(record.payload, default=str)
     async with SessionLocal() as s:
         result = await s.execute(
@@ -163,18 +147,8 @@ async def _drain_one_connector(
     stream: str,
     config: dict[str, Any],
 ) -> tuple[int, int]:
-    """Run connector.read for one stream; for every yielded item, write to raw
-    and enqueue a connector_record job. Returns (records_written, checkpoints_saved).
-
-    Note: connector.read may yield Records of MULTIPLE streams (Shopify emits
-    line_items inline with orders). Route each by record.stream, not by the
-    stream argument passed to read().
-
-    Rate limiting is now handled inside the connector via
-    ``config["rate_limiter"].acquire_sync()`` before each httpx call — that's
-    the right place to gate, since at 10k merchants Shiprocket 429s on the
-    HTTP layer, not on the record-yielding loop.
-    """
+    # connector.read may yield Records of multiple streams (Shopify emits
+    # line_items inline with orders), so route each by record.stream.
     state = await _load_state(tenant_id, connector.source_system, stream)
 
     records_written = 0
@@ -207,7 +181,7 @@ async def _drain_one_connector(
 
 async def main_async(tenant_id: str, reset: bool) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    uuid.UUID(tenant_id)  # validate
+    uuid.UUID(tenant_id)
 
     if reset:
         log.info("--reset: truncating data for tenant %s", tenant_id)
@@ -232,8 +206,6 @@ async def main_async(tenant_id: str, reset: bool) -> None:
         "access_token": "mock-meta-token",
     }
 
-    # Attach a per-source token bucket so connectors can rate-limit their
-    # own outbound httpx calls.
     shopify_cfg["rate_limiter"] = TokenBucket.for_source_sync(
         redis_url=settings.redis_url,
         tenant_id=tenant_id,
@@ -251,27 +223,23 @@ async def main_async(tenant_id: str, reset: bool) -> None:
     )
 
     # Pull in dependency order so cross-source joins resolve cleanly.
-    # 1) Shopify orders (emits orders + line_items records)
     log.info("pulling shopify orders + line_items")
     r, c = await _drain_one_connector(tenant_id, ShopifyConnector(), "orders", shopify_cfg)
     log.info("  shopify: %d records, %d checkpoints", r, c)
 
-    # 2) Shiprocket shipments (refers to shopify order ids)
     log.info("pulling shiprocket shipments")
     r, c = await _drain_one_connector(tenant_id, ShiprocketConnector(), "shipments", shiprocket_cfg)
     log.info("  shiprocket: %d records, %d checkpoints", r, c)
 
-    # 3) Meta campaigns
     log.info("pulling meta campaigns")
     r, c = await _drain_one_connector(tenant_id, MetaAdsConnector(), "campaigns", meta_cfg)
     log.info("  meta campaigns: %d records, %d checkpoints", r, c)
 
-    # 4) Meta ad_insights
     log.info("pulling meta ad_insights")
     r, c = await _drain_one_connector(tenant_id, MetaAdsConnector(), "ad_insights", meta_cfg)
     log.info("  meta ad_insights: %d records, %d checkpoints", r, c)
 
-    log.info("done — worker will drain queue and write to core.*")
+    log.info("done")
 
 
 def main() -> None:

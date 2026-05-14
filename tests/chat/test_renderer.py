@@ -13,7 +13,7 @@ def test_format_inr_uses_indian_grouping():
     assert format_inr(482310) == "₹4,82,310"
     assert format_inr(1000) == "₹1,000"
     assert format_inr(100) == "₹100"
-    assert format_inr(99999999) == "₹9,99,99,999"  # 9.99 crore
+    assert format_inr(99999999) == "₹9,99,99,999"
     assert format_inr(1234.50) == "₹1,234.50"
     assert format_inr(None) == "₹—"
 
@@ -38,9 +38,8 @@ def test_render_substitutes_placeholders():
     }
     res = render(draft, metric_results, formats={"gmv_w19": "inr"})
     assert "₹4,82,310" in res.text
-    assert "1247" in res.text  # auto-formatted integer
+    assert "1247" in res.text
     assert "₹4,82,310" in res.substituted_values
-    # the bare numeric form too — so verifier doesn't false-positive on a different rendering
     assert "1247" in res.substituted_values
 
 
@@ -64,7 +63,7 @@ def test_render_attaches_footnotes_per_placeholder():
     fn = res.footnotes[0]
     assert fn["query_hash"] == "abc"
     assert fn["total_sources"] == 100
-    assert len(fn["citations"]) == 5  # truncated to top-5
+    assert len(fn["citations"]) == 5
 
 
 def test_render_raises_on_unresolved_placeholder():
@@ -85,7 +84,6 @@ def test_render_handles_repeated_same_placeholder():
         },
     )
     assert res.text.count("100") == 2
-    # footnotes appended twice — that's fine, UI dedupes by placeholder id
 
 
 def test_render_pct_formatter():

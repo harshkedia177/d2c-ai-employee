@@ -39,7 +39,7 @@ def test_score_clamps_to_unit_interval():
     f = _features(pincode_rto_rate=2.0, customer_prior_rto_rate=2.0)
     assert _score(f) == 1.0
     g = _features()
-    assert _score(g) == _score(g)  # deterministic
+    assert _score(g) == _score(g)
 
 
 def test_high_band_when_pincode_high_rto_and_high_address_risk():
@@ -116,7 +116,6 @@ def test_decide_low_proposes_ship_as_is_no_savings():
 
 def test_decide_med_proposes_whatsapp_confirm_with_partial_savings():
     flagger = RTORiskFlagger()
-    # Construct features that score in MED band (~0.30-0.45)
     ev = Evidence(
         features={
             "pincode_rto_rate": 0.5,
@@ -141,7 +140,7 @@ def test_cold_start_pincode_marks_low_confidence():
     ev = Evidence(
         features={
             "pincode_rto_rate": 0.0,
-            "pincode_sample_size": 5,  # below threshold (20)
+            "pincode_sample_size": 5,
             "customer_prior_rto_rate": 0.0,
             "customer_orders_seen": 0,
             "sku_basket_rto_rate": 0.0,
@@ -174,7 +173,7 @@ def test_time_of_day_late_night_flagged():
 
 def test_cart_value_zscore_clamped():
     assert _cart_value_zscore(0) == 0.0
-    assert _cart_value_zscore(50000) == 1.0  # extreme high
+    assert _cart_value_zscore(50000) == 1.0
     assert 0 < _cart_value_zscore(2000) < 0.7
 
 
@@ -225,7 +224,6 @@ async def test_propose_persists_run_log_to_agent_runs():
     assert row.band == "HIGH"
     assert float(row.score) >= MED_THRESHOLD
     assert "pincode RTO 34%" in row.reasoning
-    # proposed_action.dry_run = True (never executes)
     assert row.proposed_action["dry_run"] is True
 
 
@@ -251,9 +249,7 @@ async def test_gather_with_no_pincode_returns_zero_rates():
 
 
 def test_agent_implements_protocol():
-    """Compile-time check: RTORiskFlagger satisfies Agent."""
     flagger = RTORiskFlagger()
-    # duck-typing — Agent is a Protocol, not runtime_checkable
     assert hasattr(flagger, "agent_id")
     assert hasattr(flagger, "schedule")
     assert callable(flagger.gather)
@@ -263,8 +259,6 @@ def test_agent_implements_protocol():
 
 @pytest.mark.asyncio
 async def test_customer_prior_rto_returns_real_rate_from_history():
-    """Insert 3 historical orders+shipments for a customer (2 RTO, 1 ok),
-    then call _customer_prior_rto. Must return rate=2/3 with 3 citations."""
     from packages.udm.xref import canonical_id
 
     tid = str(uuid.uuid4())
@@ -329,7 +323,6 @@ async def test_customer_prior_rto_returns_real_rate_from_history():
 
 @pytest.mark.asyncio
 async def test_customer_prior_rto_cold_start_returns_zero():
-    """No history → return (0.0, 0, [])."""
     flagger = RTORiskFlagger()
     rate, n, citations = await flagger._customer_prior_rto(str(uuid.uuid4()), "cust-nonexistent")
     assert (rate, n, citations) == (0.0, 0, [])
@@ -337,15 +330,11 @@ async def test_customer_prior_rto_cold_start_returns_zero():
 
 @pytest.mark.asyncio
 async def test_sku_rto_rate_averages_across_basket():
-    """Insert 2 SKUs with different RTO rates, then call _sku_rto_rate
-    with the basket [sku_a, sku_b]. Result should be the mean."""
     tid = str(uuid.uuid4())
     sku_a = f"SKU-A-{uuid.uuid4().hex[:6]}"
     sku_b = f"SKU-B-{uuid.uuid4().hex[:6]}"
 
     async with SessionLocal() as s:
-        # SKU A: 3 shipments, 2 RTO (rate 2/3)
-        # SKU B: 4 shipments, 1 RTO (rate 1/4)
         for i, (sku, is_rto) in enumerate(
             [
                 (sku_a, True),
@@ -428,6 +417,6 @@ async def test_sku_rto_rate_averages_across_basket():
 
     flagger = RTORiskFlagger()
     rate, citations = await flagger._sku_rto_rate(tid, [sku_a, sku_b])
-    expected = (2 / 3 + 1 / 4) / 2  # ≈ 0.458
+    expected = (2 / 3 + 1 / 4) / 2
     assert abs(rate - expected) < 0.01, f"got {rate}, expected ~{expected}"
     assert len(citations) >= 1

@@ -1,7 +1,3 @@
-"""Tests for GET /metrics — semantic-layer catalogue exposed for the UI."""
-
-from __future__ import annotations
-
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -31,7 +27,6 @@ async def test_metrics_endpoint_returns_all_eight_metrics():
 
 @pytest.mark.asyncio
 async def test_metrics_endpoint_shape():
-    """Each metric row exposes id, description, grain; each dimension row id+sql."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         r = await ac.get("/metrics")
     body = r.json()

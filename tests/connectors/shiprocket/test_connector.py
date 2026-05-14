@@ -1,4 +1,5 @@
 import httpx
+import pytest
 import respx
 
 from packages.connectors.shiprocket.connector import ShiprocketConnector
@@ -39,7 +40,6 @@ def test_login_then_read_shipments():
             },
         )
     )
-    # ensure clean cache
     ShiprocketConnector._token_cache.clear()
 
     c = ShiprocketConnector()
@@ -146,8 +146,6 @@ def test_unauthorized_token_propagates_error():
         "email": "e",
         "password": "p",
     }
-    import pytest
-
     with pytest.raises(httpx.HTTPStatusError):
         list(c.read("shipments", cfg, None))
 

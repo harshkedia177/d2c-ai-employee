@@ -1,20 +1,4 @@
-"""Meta Campaign Pauser — every 6h.
-
-Trigger: cron.
-Decision: post-RTO ROAS thresholded against spend; respects Meta's learning phase.
-
-Skips campaigns with <50 conversions in window — Meta's learning-phase
-guidance says don't kill an ad before it exits learning. Also skips
-when UTM tagging is missing (degrade gracefully — chat will tell the
-founder to fix the join).
-
-For v0 the trigger payload contains a 'campaigns' list with shape:
-  {campaign_id, name, spend, attributed_revenue, rto_adjusted_revenue,
-   conversions, learning_phase}
-In production this comes from a `compute_metric` call wrapped in the
-agent's gather(). For tests we inject the campaign list directly so
-decide() is unit-testable without a DB.
-"""
+"""Meta Campaign Pauser."""
 
 from __future__ import annotations
 
@@ -55,15 +39,10 @@ class CampaignSnapshot:
 
 
 def _decide_for_campaign(c: CampaignSnapshot) -> tuple[str, str, float, float]:
-    """Returns (action, reasoning_fragment, expected_savings, score).
-
-    score is 1 - post_rto_roas (clamped) so the run log can rank by 'how bad'.
-    """
     if c.learning_phase or c.conversions < LEARNING_PHASE_MIN_CONVERSIONS:
         return ("skip_learning_phase", f"in learning phase ({c.conversions} conv) — skip", 0.0, 0.0)
     roas = c.post_rto_roas
     if roas < PAUSE_ROAS_THRESHOLD and c.spend > PAUSE_MIN_SPEND:
-        # Savings = remaining spend if paused at this run rate (1 day)
         return (
             "pause_campaign",
             f"post-RTO ROAS {roas:.2f} < {PAUSE_ROAS_THRESHOLD} with ₹{c.spend:.0f} spend — pause",

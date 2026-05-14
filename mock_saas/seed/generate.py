@@ -21,11 +21,10 @@ def gen_orders(merchant_id: str, n: int = 1000) -> list[dict]:
     base = datetime(2026, 2, 1, tzinfo=UTC)
     for i in range(n):
         placed_at = base + timedelta(days=random.randint(0, 90), hours=random.randint(0, 23))
-        is_cod = random.random() < 0.65  # 65% COD share, realistic for IN D2C
+        is_cod = random.random() < 0.65
         pincode = random.choice(PINCODES_HIGH_RTO + PINCODES_LOW_RTO)
         cart_value = round(random.uniform(499, 4999), 2)
         utm = f"camp-{random.randint(1, 10)}"
-        # ~5% of orders get a partial refund 1–14 days after placement
         if random.random() < 0.05:
             refund_amount = round(cart_value * random.uniform(0.05, 0.30), 2)
             refunded_at = placed_at + timedelta(days=random.randint(1, 14))
@@ -81,9 +80,7 @@ def gen_orders(merchant_id: str, n: int = 1000) -> list[dict]:
                 "refunds": refunds,
             }
         )
-    # Sort by updated_at so cursor-paginating connectors (updated_at_min) see
-    # the full volume; otherwise each page's max-cursor advances past
-    # later rows still on disk and the connector skips them.
+    # Sort by updated_at so cursor-paginating connectors don't skip rows.
     out.sort(key=lambda o: o["updated_at"])
     return out
 
@@ -93,7 +90,6 @@ def gen_shipments(orders: list[dict]) -> list[dict]:
     for o in orders:
         is_cod = o["gateway"] == "Cash on Delivery"
         zip_ = o["shipping_address"]["zip"]
-        # high RTO when COD + bad pincode; low RTO otherwise
         rto_prob = 0.33 if (is_cod and zip_ in PINCODES_HIGH_RTO) else 0.05
         is_rto = random.random() < rto_prob
         shipped = datetime.fromisoformat(o["created_at"])
@@ -112,8 +108,7 @@ def gen_shipments(orders: list[dict]) -> list[dict]:
                 "delivered_date": (shipped + timedelta(days=random.randint(2, 6))).isoformat(),
             }
         )
-    # Sort by shipped_date so the Shiprocket connector's date cursor walks
-    # the whole list rather than skipping ahead.
+    # Sort by shipped_date so the Shiprocket date cursor walks the whole list.
     out.sort(key=lambda s: s["shipped_date"])
     return out
 
@@ -153,8 +148,6 @@ def gen_meta(merchant_id: str, n_campaigns: int = 10) -> tuple[list[dict], list[
                     ],
                 }
             )
-    # Sort by (date_start, campaign_id) so the Meta connector's date_start
-    # cursor sees the whole volume.
     insights.sort(key=lambda r: (r["date_start"], r["campaign_id"]))
     return campaigns, insights
 

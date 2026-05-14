@@ -12,15 +12,14 @@ REDIS_URL = os.environ.get("TEST_REDIS_URL", "redis://localhost:6379/15")
 
 @pytest.mark.asyncio
 async def test_acquire_blocks_until_tokens_refill():
-    """Acquire capacity tokens immediately, then the next acquire must wait."""
     key = f"test:{uuid.uuid4().hex}:shiprocket"
     b = TokenBucket(redis_url=REDIS_URL, key=key, refill_per_sec=1.0, capacity=2)
     await b.reset()
     try:
-        await b.acquire()  # 1
-        await b.acquire()  # 2
+        await b.acquire()
+        await b.acquire()
         start = time.time()
-        await b.acquire()  # must wait ~1s
+        await b.acquire()
         elapsed = time.time() - start
         assert 0.7 < elapsed < 2.0, f"expected ~1s wait, got {elapsed:.2f}s"
     finally:
@@ -30,7 +29,6 @@ async def test_acquire_blocks_until_tokens_refill():
 
 @pytest.mark.asyncio
 async def test_burst_within_capacity_does_not_block():
-    """capacity tokens should be acquirable in <100ms total."""
     key = f"test:{uuid.uuid4().hex}:shopify"
     b = TokenBucket(redis_url=REDIS_URL, key=key, refill_per_sec=2.0, capacity=10)
     await b.reset()
@@ -47,7 +45,6 @@ async def test_burst_within_capacity_does_not_block():
 
 @pytest.mark.asyncio
 async def test_two_buckets_with_different_keys_are_independent():
-    """Tenant isolation: tenant A draining bucket doesn't affect tenant B."""
     k1 = f"test:{uuid.uuid4().hex}:t1"
     k2 = f"test:{uuid.uuid4().hex}:t2"
     a = TokenBucket(REDIS_URL, k1, refill_per_sec=1.0, capacity=2)
@@ -57,7 +54,6 @@ async def test_two_buckets_with_different_keys_are_independent():
     try:
         await a.acquire()
         await a.acquire()
-        # bucket b is fresh — should not block
         start = time.time()
         await b.acquire()
         await b.acquire()
@@ -71,8 +67,6 @@ async def test_two_buckets_with_different_keys_are_independent():
 
 @pytest.mark.asyncio
 async def test_concurrent_workers_atomic_acquire():
-    """4 concurrent coroutines, capacity=4, refill=very slow.
-    Exactly 4 should succeed within 100ms; the 5th waits."""
     key = f"test:{uuid.uuid4().hex}:concurrent"
     bucket_factory = lambda: TokenBucket(  # noqa: E731
         REDIS_URL,
@@ -95,7 +89,6 @@ async def test_concurrent_workers_atomic_acquire():
 
     results = await asyncio.gather(*[worker(i) for i in range(5)])
     durations = sorted(d for _, d in results)
-    # 4 fast (<100ms), 1 slow (>1s due to refill 0.1/s)
     assert all(d < 0.5 for d in durations[:4]), durations
     assert durations[4] > 1.0, durations
 
@@ -122,7 +115,6 @@ async def test_for_source_rejects_unknown_source():
 
 
 def test_acquire_sync_blocks_until_tokens_refill():
-    """3 sync acquires on a capacity=2, refill=1/s bucket: 2 immediate, 3rd waits ~1s."""
     key = f"test-sync:{uuid.uuid4().hex}:shiprocket"
     b = TokenBucket(
         redis_url=REDIS_URL,

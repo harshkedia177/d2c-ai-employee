@@ -1,8 +1,4 @@
-"""Seed a demo tenant + a handful of agent_runs for the UI to render.
-
-Idempotent — re-running won't duplicate rows (ON CONFLICT DO NOTHING / fixed
-run_ids).
-"""
+"""Seed a demo tenant + a handful of agent_runs for the UI to render."""
 
 from __future__ import annotations
 
@@ -18,7 +14,6 @@ DEMO_TENANT_ID = "00000000-0000-0000-0000-000000000001"
 DEMO_SLUG = "demo"
 
 
-# Fixed run UUIDs so re-seeding is idempotent.
 RUN_RTO_HIGH_1 = "11111111-1111-1111-1111-000000000001"
 RUN_RTO_HIGH_2 = "11111111-1111-1111-1111-000000000002"
 RUN_RTO_MED_1 = "11111111-1111-1111-1111-000000000003"

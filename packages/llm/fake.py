@@ -1,19 +1,10 @@
-"""FakeLLMClient — used by tests to script tool-use loops without any API.
-
-Usage:
-    fake = FakeLLMClient([
-        LLMResponse(tool_calls=[ToolCall("compute_metric", {"metric_id": "gmv"})]),
-        LLMResponse(text="GMV last week was {{m:gmv_0}}."),
-    ])
-    out = await fake.generate(...)  # returns first response, then second, etc.
-"""
+"""FakeLLMClient for tests."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from packages.llm.client import LLMResponse
+from packages.llm.client import LLMResponse
 
 
 class FakeLLMClient:

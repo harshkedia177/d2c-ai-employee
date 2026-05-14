@@ -13,11 +13,8 @@ async def test_compiled_gmv_sql_runs_against_real_postgres():
     async with engine.connect() as conn:
         result = await conn.execute(text(q.sql), q.params)
         rows = result.fetchall()
-    # No data inserted -> 1 row with value=NULL or value=0, citations=NULL or empty
     assert len(rows) == 1
-    # value column present
     assert hasattr(rows[0], "value") or "value" in rows[0]._mapping
-    # citations column present (may be None when no rows)
     assert "citations" in rows[0]._mapping
 
 
@@ -31,5 +28,4 @@ async def test_compiled_post_rto_roas_with_dim_runs():
     )
     async with engine.connect() as conn:
         result = await conn.execute(text(q.sql), q.params)
-        # No rows expected (empty DB), just confirm no parse/plan error
         result.fetchall()

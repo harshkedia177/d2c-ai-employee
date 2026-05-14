@@ -1,6 +1,9 @@
 import json
 import subprocess
+import tempfile
 from pathlib import Path
+
+from mock_saas.seed.generate import PINCODES_HIGH_RTO
 
 
 def test_seed_generates_orders_with_rto_pattern(tmp_path: Path):
@@ -22,14 +25,10 @@ def test_seed_generates_orders_with_rto_pattern(tmp_path: Path):
     assert len(orders) == 200
     assert len(shipments) == 200
     rto_rate = sum(1 for s in shipments if s["is_rto"]) / len(shipments)
-    assert 0.05 < rto_rate < 0.50  # realistic RTO range
+    assert 0.05 < rto_rate < 0.50
 
 
 def test_seed_high_rto_pincodes_have_higher_rto_than_low_rto():
-    """The seed encodes a real signal: COD orders to PINCODES_HIGH_RTO have ~33% RTO,
-    others ~5%. Without this signal, the RTO agent has nothing to detect."""
-    import tempfile
-
     with tempfile.TemporaryDirectory() as d:
         subprocess.check_call(
             [
@@ -45,8 +44,6 @@ def test_seed_high_rto_pincodes_have_higher_rto_than_low_rto():
         )
         orders = json.loads(Path(d, "m000_shopify_orders.json").read_text())
         shipments = json.loads(Path(d, "m000_shiprocket_shipments.json").read_text())
-
-    from mock_saas.seed.generate import PINCODES_HIGH_RTO
 
     by_zip = {o["id"]: o["shipping_address"]["zip"] for o in orders}
     by_gw = {o["id"]: o["gateway"] for o in orders}

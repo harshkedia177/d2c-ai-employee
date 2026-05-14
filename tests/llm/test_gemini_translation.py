@@ -1,5 +1,3 @@
-"""Pure tests for the SDK-shape translation functions. These DON'T hit Gemini."""
-
 from packages.llm.gemini import _to_gemini_messages, _to_gemini_schema
 
 

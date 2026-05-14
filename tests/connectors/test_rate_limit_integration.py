@@ -1,9 +1,3 @@
-"""Verify each connector calls acquire_sync() on a rate_limiter passed via
-config before making outbound httpx calls, and works gracefully when no
-rate_limiter is configured."""
-
-from __future__ import annotations
-
 from unittest.mock import MagicMock
 
 import httpx
@@ -12,8 +6,6 @@ import respx
 from packages.connectors.meta_ads.connector import MetaAdsConnector
 from packages.connectors.shiprocket.connector import ShiprocketConnector
 from packages.connectors.shopify.connector import ShopifyConnector
-
-# ---------- Shopify ----------
 
 
 @respx.mock
@@ -36,7 +28,6 @@ def test_shopify_connector_acquires_before_http():
 
 @respx.mock
 def test_shopify_connector_works_without_rate_limiter():
-    """No rate_limiter in config → connector still works."""
     respx.get("http://localhost:9000/shopify/m000/admin/api/2026-01/orders.json").mock(
         return_value=httpx.Response(200, json={"orders": []})
     )
@@ -50,22 +41,16 @@ def test_shopify_connector_works_without_rate_limiter():
     assert isinstance(out, list)
 
 
-# ---------- Shiprocket ----------
-
-
 @respx.mock
 def test_shiprocket_connector_acquires_before_http():
-    # Token endpoint
     respx.post("http://localhost:9000/shiprocket/v1/external/auth/login").mock(
         return_value=httpx.Response(200, json={"token": "fake-token", "expires_in": 240 * 3600})
     )
-    # Orders endpoint — return empty data so we break out immediately
     respx.get("http://localhost:9000/shiprocket/v1/external/orders").mock(
         return_value=httpx.Response(200, json={"data": []})
     )
     fake_bucket = MagicMock()
     fake_bucket.acquire_sync = MagicMock(return_value=None)
-    # Fresh class to avoid token cache from prior tests
     ShiprocketConnector._token_cache.clear()
     c = ShiprocketConnector()
     cfg = {
@@ -76,7 +61,6 @@ def test_shiprocket_connector_acquires_before_http():
         "rate_limiter": fake_bucket,
     }
     list(c.read("shipments", cfg, state=None))
-    # at least one acquire before token POST, one before orders GET
     assert fake_bucket.acquire_sync.call_count >= 2
 
 
@@ -98,9 +82,6 @@ def test_shiprocket_connector_works_without_rate_limiter():
     }
     out = list(c.read("shipments", cfg, state=None))
     assert isinstance(out, list)
-
-
-# ---------- Meta ----------
 
 
 @respx.mock

@@ -17,7 +17,6 @@ from packages.chat.tools import (
 from packages.warehouse.db import SessionLocal
 
 
-# Helper: insert one synthetic order so compute_metric has data to aggregate
 async def _insert_order(tenant_id: str, total: float = 1000.0) -> str:
     canonical_id = str(uuid.uuid4())
     async with SessionLocal() as s:
@@ -159,7 +158,6 @@ async def test_run_sql_blocks_writes_when_enabled():
 async def test_search_examples_returns_relevant_results():
     out = await search_examples(tenant_id="t1", question="what's my GMV last 30 days")
     assert len(out["examples"]) >= 1
-    # top result should be gmv-related
     assert "gmv" in out["examples"][0]["question"].lower() or any(
         "gmv" in str(call.get("args", {})) for call in out["examples"][0]["plan"]
     )
@@ -200,11 +198,10 @@ async def test_propose_write_rejects_unknown_action():
 
 @pytest.mark.asyncio
 async def test_search_examples_falls_back_to_substring_when_no_embeddings():
-    """No embeddings client → substring overlap fallback, retrieval flag set."""
     from packages.chat import tools as tools_mod
 
-    # Force the lazy client to None and override the getter (in case
-    # GEMINI_API_KEY is set in the env, we still want to test the fallback).
+    # Force the lazy client to None and override the getter even when
+    # GEMINI_API_KEY is set in the env, so we exercise the fallback.
     tools_mod._embeddings_client = None
     orig = tools_mod._get_embeddings_client
     tools_mod._get_embeddings_client = lambda: None
@@ -219,8 +216,6 @@ async def test_search_examples_falls_back_to_substring_when_no_embeddings():
 
 @pytest.mark.asyncio
 async def test_search_examples_uses_halfvec_when_examples_indexed(monkeypatch):
-    """Seed core.few_shot_examples with deterministic FakeEmbeddings vectors,
-    then call search_examples — must use halfvec NN, not substring."""
     import json
     from datetime import UTC, datetime
 
@@ -264,7 +259,6 @@ async def test_search_examples_uses_halfvec_when_examples_indexed(monkeypatch):
     def _fmt(v: list[float]) -> str:
         return "[" + ",".join(f"{x:.6f}" for x in v) + "]"
 
-    # Clean any prior test rows, then seed fresh under embedding_version='v1'.
     async with SessionLocal() as cs:
         await cs.execute(
             text("DELETE FROM core.few_shot_examples WHERE source_record_url LIKE 'test://%'")
@@ -297,7 +291,6 @@ async def test_search_examples_uses_halfvec_when_examples_indexed(monkeypatch):
         out = await search_examples(tenant_id="t1", question="How is my GMV last 30 days?")
         assert out.get("retrieval") == "halfvec_cosine_nn"
         assert len(out["examples"]) >= 1
-        # Top result must be the exact match (same FakeEmbeddings vector → cosine 0).
         assert out["examples"][0]["question"] == "How is my GMV last 30 days?"
     finally:
         async with SessionLocal() as cs:

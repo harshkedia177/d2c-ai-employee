@@ -82,7 +82,7 @@ def test_decide_aggregates_proposals_and_total_savings():
                     rto_adjusted_revenue=4_000,
                     conversions=80,
                     learning_phase=False,
-                ),  # PAUSE → save 10k
+                ),
                 dict(
                     campaign_id="c2",
                     name="meh",
@@ -91,7 +91,7 @@ def test_decide_aggregates_proposals_and_total_savings():
                     rto_adjusted_revenue=18_000,
                     conversions=200,
                     learning_phase=False,
-                ),  # REDUCE → save 10k
+                ),
                 dict(
                     campaign_id="c3",
                     name="learning",
@@ -100,7 +100,7 @@ def test_decide_aggregates_proposals_and_total_savings():
                     rto_adjusted_revenue=2_000,
                     conversions=10,
                     learning_phase=True,
-                ),  # SKIP
+                ),
             ],
         },
         citations=[],

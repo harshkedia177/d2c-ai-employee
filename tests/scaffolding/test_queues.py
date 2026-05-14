@@ -10,10 +10,8 @@ from packages.warehouse.db import SessionLocal
 
 @pytest.fixture(autouse=True)
 async def _clean_test_jobs():
-    """Each test runs against a unique tenant_id so rows don't collide."""
     yield
     async with SessionLocal() as s:
-        # cleanup any rows older than 5 min on both queues to keep DB tidy
         await s.execute(
             text(
                 "DELETE FROM control.queue_realtime WHERE enqueued_at < now() - interval '5 minutes'"
@@ -33,7 +31,6 @@ async def test_enqueue_then_dequeue_returns_payload():
     job_id = await enqueue("realtime", tid, "test_kind", {"x": 1})
     assert job_id > 0
     job = await dequeue("realtime")
-    # may return another tenant's job too — find ours
     while job and job["tenant_id"] != uuid.UUID(tid):
         await complete("realtime", job["id"])
         job = await dequeue("realtime")
@@ -45,17 +42,12 @@ async def test_enqueue_then_dequeue_returns_payload():
 
 @pytest.mark.asyncio
 async def test_two_workers_skip_locked_get_different_jobs():
-    """SKIP LOCKED guarantees concurrent dequeues don't return the same row."""
     tid = str(uuid.uuid4())
     a = await enqueue("realtime", tid, "k", {"n": 1})
     b = await enqueue("realtime", tid, "k", {"n": 2})
 
-    # Two concurrent dequeues — must return distinct ids
     j1, j2 = await asyncio.gather(dequeue("realtime"), dequeue("realtime"))
-    # filter to our tenant only
     ours = [j for j in (j1, j2) if j and j["tenant_id"] == uuid.UUID(tid)]
-    # we may not get both at the same instant if other tenants' jobs are pending,
-    # but if both came back to us they must be distinct
     if len(ours) == 2:
         assert ours[0]["id"] != ours[1]["id"]
         assert {ours[0]["id"], ours[1]["id"]} == {a, b}
@@ -65,12 +57,10 @@ async def test_two_workers_skip_locked_get_different_jobs():
 
 @pytest.mark.asyncio
 async def test_realtime_and_backfill_are_isolated():
-    """A job on realtime is invisible to backfill dequeue and vice versa."""
     tid = str(uuid.uuid4())
     rid = await enqueue("realtime", tid, "rt", {})
     bid = await enqueue("backfill", tid, "bf", {})
 
-    # drain backfill first — may need to skip other tenants' rows
     seen_bids: set[int] = set()
     while True:
         j = await dequeue("backfill")
@@ -83,7 +73,6 @@ async def test_realtime_and_backfill_are_isolated():
     assert bid in seen_bids
     assert rid not in seen_bids
 
-    # cleanup our realtime job
     while True:
         j = await dequeue("realtime")
         if j is None:
@@ -91,7 +80,7 @@ async def test_realtime_and_backfill_are_isolated():
         if j["id"] == rid:
             await complete("realtime", j["id"])
             break
-        await complete("realtime", j["id"])  # drain others
+        await complete("realtime", j["id"])
 
 
 @pytest.mark.asyncio
@@ -107,7 +96,6 @@ async def test_complete_then_dequeue_does_not_return_same_job():
     assert j is not None and j["id"] == job_id
     await complete("realtime", job_id)
 
-    # second dequeue should NOT return job_id again
     next_j = await dequeue("realtime")
     while next_j is not None:
         assert next_j["id"] != job_id, "completed job was redelivered"
@@ -126,7 +114,6 @@ async def test_fail_releases_job_back_to_pool():
     assert j is not None
     await fail("realtime", job_id, "boom")
 
-    # the same job should be dequeue-able again with attempts >= 2
     seen_again = False
     j2 = await dequeue("realtime")
     while j2 is not None:
@@ -137,7 +124,6 @@ async def test_fail_releases_job_back_to_pool():
         await complete("realtime", j2["id"])
         j2 = await dequeue("realtime")
     assert seen_again
-    # confirm last_error stamped
     async with SessionLocal() as s:
         r = await s.execute(
             text("SELECT last_error, attempts FROM control.queue_realtime WHERE id = :i"),

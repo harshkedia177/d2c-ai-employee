@@ -1,19 +1,4 @@
-"""Realtime queue worker.
-
-Drains `control.queue_realtime` and dispatches jobs by `kind`:
-
-  - shopify_webhook       (produced by packages/api/webhook_routes.py)
-                          Loads payload from raw.shopify_webhook_inbox,
-                          runs RTORiskFlagger if gateway == "Cash on Delivery".
-
-  - connector_record      (produced by scripts/pull_demo_data.py)
-                          Loads payload from the source raw table, runs the
-                          matching normalizer, inserts the result into the
-                          matching core.* table with ON CONFLICT DO NOTHING.
-
-No new abstraction layer — two literal dispatch dicts + one handler per kind.
-Reuses every existing utility unchanged.
-"""
+"""Realtime queue worker."""
 
 from __future__ import annotations
 
@@ -46,7 +31,6 @@ from packages.warehouse.db import SessionLocal
 
 log = logging.getLogger(__name__)
 
-# Dispatch table: (source_system, stream) → (normalizer_fn, target_core_table_short_name)
 NORMALIZER_DISPATCH: dict[tuple[str, str], tuple[Any, str]] = {
     ("shopify", "orders"): (order_from_shopify, "order"),
     ("shopify", "line_items"): (order_line_from_shopify, "order_line"),
@@ -58,8 +42,6 @@ NORMALIZER_DISPATCH: dict[tuple[str, str], tuple[Any, str]] = {
     ("meta_ads", "ad_insights"): (ad_spend_daily_from_meta, "ad_spend_daily"),
 }
 
-# INSERT SQL per target entity. Each idempotent via ON CONFLICT DO NOTHING.
-# Column lists MUST match the migration in packages/warehouse/migrations/versions/0001_init.py.
 _CORE_INSERTS: dict[str, str] = {
     "order": """
       INSERT INTO core."order" (
@@ -178,9 +160,6 @@ _CORE_INSERTS: dict[str, str] = {
 }
 
 
-# Per-entity timestamp string fields that asyncpg requires as datetime.
-# (Provenance columns fetched_at/ingested_at come from the normalizer as
-# real datetimes already; we only coerce stringy payload-derived ones.)
 _TIMESTAMP_FIELDS: dict[str, tuple[str, ...]] = {
     "order": ("placed_at",),
     "order_line": (),
@@ -194,8 +173,6 @@ _TIMESTAMP_FIELDS: dict[str, tuple[str, ...]] = {
 
 
 def _parse_ts(value: Any) -> Any:
-    """Coerce an ISO-8601 string (possibly with trailing 'Z') to datetime.
-    Pass through None and existing datetimes unchanged."""
     if value is None or isinstance(value, datetime):
         return value
     if isinstance(value, str):
@@ -203,13 +180,7 @@ def _parse_ts(value: Any) -> Any:
     return value
 
 
-# ---------- handlers ----------
-
-
 async def _handle_connector_record(job: dict[str, Any]) -> None:
-    """Job kind: connector_record. Payload contains references to a raw row
-    that was already INSERTed by the pull-script. We reconstruct a Record,
-    run the matching normalizer, write to core."""
     p = job["payload"]
     source_system = p["source_system"]
     stream = p["stream"]
@@ -223,7 +194,6 @@ async def _handle_connector_record(job: dict[str, Any]) -> None:
         return
     normalizer_fn, entity = dispatch
 
-    # Fetch the raw payload + provenance from the raw table.
     async with SessionLocal() as s:
         result = await s.execute(
             text(
@@ -250,12 +220,10 @@ async def _handle_connector_record(job: dict[str, Any]) -> None:
     core_row = normalizer_fn(record, tenant_id, raw_row_id)
     insert_sql = _CORE_INSERTS[entity]
 
-    # Coerce ISO-8601 string timestamps to datetime for asyncpg.
     for field in _TIMESTAMP_FIELDS.get(entity, ()):
         if field in core_row:
             core_row[field] = _parse_ts(core_row[field])
 
-    # Coerce ad_spend_daily.date string to datetime.date for asyncpg.
     if entity == "ad_spend_daily" and isinstance(core_row.get("date"), str):
         from datetime import date as _date
 
@@ -267,8 +235,6 @@ async def _handle_connector_record(job: dict[str, Any]) -> None:
 
 
 async def _handle_shopify_webhook(job: dict[str, Any]) -> None:
-    """Job kind: shopify_webhook. Webhook route already wrote the body to
-    raw.shopify_webhook_inbox. Load it, run RTORiskFlagger if COD."""
     p = job["payload"]
     raw_row_id = int(p["raw_row_id"])
     tenant_id = str(job["tenant_id"])
@@ -288,7 +254,7 @@ async def _handle_shopify_webhook(job: dict[str, Any]) -> None:
         order_payload = dict(row.payload)
 
     if order_payload.get("gateway") != "Cash on Delivery":
-        return  # RTO Flagger only cares about COD orders
+        return
 
     flagger = RTORiskFlagger()
     ctx = AgentContext(tenant_id=tenant_id, trigger_payload=order_payload)
@@ -297,8 +263,6 @@ async def _handle_shopify_webhook(job: dict[str, Any]) -> None:
     await flagger.propose(ctx, decision, evidence)
 
 
-# ---------- top-level dispatch ----------
-
 JOB_HANDLERS: dict[str, Any] = {
     "shopify_webhook": _handle_shopify_webhook,
     "connector_record": _handle_connector_record,
@@ -306,8 +270,6 @@ JOB_HANDLERS: dict[str, Any] = {
 
 
 async def process_one() -> bool:
-    """Pop one job and process it. Returns True if a job was processed,
-    False if the queue was empty. Test entrypoint."""
     job = await dequeue("realtime")
     if job is None:
         return False
@@ -327,7 +289,6 @@ async def process_one() -> bool:
 
 
 async def worker_loop(poll_interval_s: float = 1.0) -> None:
-    """Run forever. Signal-handled (SIGINT / SIGTERM) for graceful shutdown."""
     stop_event = asyncio.Event()
 
     def _signal_handler(*_: Any) -> None:
@@ -336,7 +297,6 @@ async def worker_loop(poll_interval_s: float = 1.0) -> None:
 
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
-        # Windows doesn't support add_signal_handler; skip if so.
         with contextlib.suppress(NotImplementedError):
             loop.add_signal_handler(sig, _signal_handler)
 

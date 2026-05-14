@@ -1,31 +1,18 @@
-"""The chat tool-use loop.
-
-Single entry point: chat_turn(tenant_id, user_message, llm).
-
-Wiring:
-  user message
-    -> LLM (with tool schemas + system prompt)
-    -> if tool_calls: dispatch via TOOL_REGISTRY, feed results back
-    -> if final text: render placeholders, verify no uncited numerals
-    -> on verify failure: prompt LLM to restate using only tool-derived metrics
-
-The system prompt is the contract written for the model. It says:
-  - Never type a literal numeral.
-  - Use {{m:metric_id_N}} placeholders for numbers.
-  - Refuse to estimate or approximate without a tool result.
-"""
+"""The chat tool-use loop."""
 
 from __future__ import annotations
 
+import datetime as _dt
 import logging
-from typing import TYPE_CHECKING, Any
+import re
+from decimal import Decimal
+from typing import Any
+from uuid import UUID
 
 from packages.chat.renderer import RenderResult, render
 from packages.chat.tools import TOOL_REGISTRY, TOOL_SCHEMAS
 from packages.chat.verifier import find_violations
-
-if TYPE_CHECKING:
-    from packages.llm.client import LLMClient, LLMResponse
+from packages.llm.client import LLMClient, LLMResponse
 
 log = logging.getLogger(__name__)
 
@@ -81,16 +68,14 @@ async def chat_turn(
     user_message: str,
     llm: LLMClient,
 ) -> dict[str, Any]:
-    """Run one chat turn end-to-end. Returns {text, footnotes, status}."""
     messages: list[dict[str, Any]] = [
         {"role": "user", "content": user_message},
     ]
     metric_results: dict[str, dict[str, Any]] = {}
     metric_counter: dict[str, int] = {}
     formats: dict[str, str] = {}
-    # Numeric strings the verifier should treat as already-cited, on top of
-    # whatever the renderer adds. Used for dimension values (pincodes,
-    # ad_ids, dates) — those are keys, not measurements.
+    # Dimension values (pincodes, ad_ids, dates) are keys, not measurements —
+    # admit them as already-cited so the verifier doesn't reject them.
     permitted_literals: set[str] = set()
 
     for _turn in range(MAX_TURNS):
@@ -106,7 +91,6 @@ async def chat_turn(
             (resp.text or "")[:200],
         )
 
-        # If the model called tools, run them and loop.
         if resp.tool_calls:
             for tc in resp.tool_calls:
                 tool = TOOL_REGISTRY.get(tc.name)
@@ -121,11 +105,10 @@ async def chat_turn(
                     continue
                 try:
                     result = await tool(tenant_id=tenant_id, **tc.arguments)
-                except Exception as e:  # tool error -- feed back, let LLM recover
+                except Exception as e:
                     log.warning("tool %s raised: %s", tc.name, e)
                     result = {"error": str(e)}
 
-                # If this was a compute_metric, register the result for placeholder use.
                 placeholder_key: str | None = None
                 row_placeholders: list[str] = []
                 tool_payload = _serializable(result)
@@ -145,9 +128,7 @@ async def chat_turn(
                     serialized_rows = (
                         tool_payload.get("rows") if isinstance(tool_payload, dict) else []
                     ) or []
-                    import re as _re
-
-                    _num_re = _re.compile(r"\b\d[\d,]*(?:\.\d+)?\b")
+                    _num_re = re.compile(r"\b\d[\d,]*(?:\.\d+)?\b")
                     for i, srow in enumerate(serialized_rows):
                         pkey = f"{metric_id}_{base_n}_{i}"
                         per_row_result = {
@@ -187,14 +168,13 @@ async def chat_turn(
                         "content": tool_payload,
                     }
                 )
-            continue  # loop back to LLM
+            continue
 
-        # No tool calls -- model emitted a final draft.
         draft = resp.text or ""
         rendered: RenderResult
         try:
             rendered = render(draft, metric_results, formats=formats)
-        except Exception as e:  # unresolved placeholder
+        except Exception as e:
             messages.append(
                 {
                     "role": "system",
@@ -210,14 +190,13 @@ async def chat_turn(
         allowed = rendered.substituted_values | frozenset(permitted_literals)
         violations = find_violations(rendered.text, allowed)
         if violations:
-            # Up to MAX_VERIFY_RETRIES, ask the model to restate.
             verify_attempts = sum(
                 1
                 for m in messages
                 if m.get("role") == "system" and "VERIFIER REJECTED" in str(m.get("content", ""))
             )
             if verify_attempts >= MAX_VERIFY_RETRIES:
-                # Hard refuse -- do NOT emit text with uncited numerals.
+                # Hard refuse — do not emit text with uncited numerals.
                 return {
                     "text": (
                         "I cannot give a numerical answer without computing "
@@ -268,10 +247,6 @@ def _format_for(metric_id: str) -> str:
 
 def _serializable(obj: Any) -> Any:
     """Convert decimals/dates/UUIDs to plain types for JSON serialization."""
-    import datetime as _dt
-    from decimal import Decimal
-    from uuid import UUID
-
     if isinstance(obj, dict):
         return {k: _serializable(v) for k, v in obj.items()}
     if isinstance(obj, list):

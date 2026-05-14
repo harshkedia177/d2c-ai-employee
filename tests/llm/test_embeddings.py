@@ -21,5 +21,4 @@ def test_fake_embeddings_records_calls():
 
 
 def test_fake_embeddings_default_dim_matches_table_schema():
-    """EMBEDDING_DIM must stay 3072 to match core.few_shot_examples.embedding."""
     assert EMBEDDING_DIM == 3072

@@ -1,13 +1,4 @@
-"""Compile a MetricRequest into SQL with mandatory citation projection.
-
-Why mandatory: the chat layer's citation contract requires every numerical
-claim to carry source rows. The compiler is the chokepoint — if any metric
-ever runs without `citations` projected, an LLM-emitted number could
-slip through unverifiable. The compiler test suite asserts the citations
-array is in every emitted SQL.
-
-Filter operators: `field__gte`, `field__lte`, `field__eq` (default), `field__in`.
-"""
+"""Compile a MetricRequest into SQL with mandatory citation projection."""
 
 from __future__ import annotations
 
@@ -38,17 +29,11 @@ def _load_config() -> dict[str, Any]:
 
 
 def _parse_citation_select(citation_select: str) -> list[tuple[str, str]]:
-    """Parse the YAML `citation_select` block into [(expr, alias), ...].
-
-    Each entry like `o.source_system AS _source_system` becomes
-    ('o.source_system', '_source_system').
-    """
     out: list[tuple[str, str]] = []
     for raw in citation_select.split(","):
         line = raw.strip()
         if not line:
             continue
-        # split on " AS " (case-insensitive)
         upper = line.upper()
         idx = upper.find(" AS ")
         if idx == -1:
@@ -70,9 +55,6 @@ _TIME_ALIASES = frozenset(
 def _rewrite_time_filters(
     filters: dict[str, Any], time_column: str | None
 ) -> dict[str, Any]:
-    """Aliases generic time filter keys (`date__gte`, `created_at__lte`, ...) to
-    the metric's declared `time_column`. No-op if the metric doesn't declare one
-    or the key's field already matches."""
     if not time_column:
         return filters
     out: dict[str, Any] = {}
@@ -90,7 +72,6 @@ def _rewrite_time_filters(
 
 
 def _filter_clause(filters: dict[str, Any], base_alias: str) -> tuple[str, dict[str, Any]]:
-    """Convert filter dict into 'AND ...' SQL fragment + params."""
     parts: list[str] = []
     params: dict[str, Any] = {}
     for raw_key, value in filters.items():
@@ -98,7 +79,6 @@ def _filter_clause(filters: dict[str, Any], base_alias: str) -> tuple[str, dict[
             field, op = raw_key.rsplit("__", 1)
         else:
             field, op = raw_key, "eq"
-        # qualify field with base_alias unless explicitly qualified already
         qualified = f"{base_alias}.{field}" if "." not in field else field
         param_name = raw_key.replace(".", "_").replace("__", "_")
         if op == "gte":
@@ -147,7 +127,6 @@ def compile_metric(
     min_sample = meta.get("min_sample_size", 0)
 
     citation_parts = _parse_citation_select(citation_select)
-    # Build a mapping alias -> expr for the jsonb_build_object.
     cite_map = {alias: expr for expr, alias in citation_parts}
     required_aliases = [
         "_source_system",
@@ -219,7 +198,6 @@ def compile_metric(
 
 
 def list_metrics() -> list[dict[str, Any]]:
-    """Return metric definitions for `get_schema()` tool."""
     config = _load_config()
     out = []
     for name, meta in config["metrics"].items():

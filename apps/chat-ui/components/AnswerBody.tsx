@@ -20,7 +20,6 @@ type Props = {
   containerId: string;
 };
 
-// Match either ₹ amounts or percentages (with optional decimals).
 const NUMBER_RE = /(₹[\d,]+(?:\.\d+)?|\d+(?:\.\d+)?%)/g;
 
 type Token =
@@ -64,8 +63,6 @@ export function AnswerBody({
   const marksRef = useRef<Map<number, HTMLElement>>(new Map());
   const [, setTick] = useState(0);
 
-  // Pre-compute the paragraph token streams. We assign global numeral
-  // indices across all paragraphs.
   const paragraphs = useMemo(() => {
     const paras = splitParagraphs(text);
     let cursor = 0;
@@ -78,7 +75,6 @@ export function AnswerBody({
     });
   }, [text]);
 
-  // Total number of marks rendered.
   const numMarks = useMemo(
     () => paragraphs.flat().filter((t) => t.kind === "num").length,
     [paragraphs],

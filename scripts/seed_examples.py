@@ -1,11 +1,4 @@
-"""Embed the curated (question, plan) examples and INSERT into core.few_shot_examples.
-
-Idempotent — re-running deletes prior rows by (question, embedding_version)
-and re-inserts.
-
-Requires GEMINI_API_KEY. Use --dry-run to print intended actions without
-hitting Gemini.
-"""
+"""Embed the curated (question, plan) examples and INSERT into core.few_shot_examples."""
 
 from __future__ import annotations
 
@@ -34,7 +27,6 @@ EXAMPLES_PATH = ROOT / "packages" / "semantic_layer" / "examples.json"
 
 
 def _format_halfvec(vec: list[float]) -> str:
-    """halfvec binding via psycopg accepts a literal string '[v1, v2, ...]'."""
     return "[" + ",".join(f"{v:.6f}" for v in vec) + "]"
 
 

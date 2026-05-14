@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from packages.connectors.base import Record
+from packages.connectors.base import Record
 
 
 def provenance_columns(
@@ -16,12 +15,6 @@ def provenance_columns(
     connector_version: str,
     source_system: str,
 ) -> dict[str, Any]:
-    """The 9 mandatory columns on every core.* row.
-
-    Raises ValueError if the Record is missing source_record_url
-    (the Connector base already enforces this, but defense in depth
-    matters for the citation contract).
-    """
     if not record.source_record_url:
         raise ValueError(
             f"Cannot normalize {record.stream}/{record.primary_key}: "

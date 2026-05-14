@@ -53,7 +53,6 @@ export function Masthead({ tenants, selectedTenantId, onChange }: Props) {
       }}
     >
       <div className="grid grid-cols-[1.2fr_1fr_1.2fr] items-end gap-6 pb-4">
-        {/* Left: logotype */}
         <div>
           <div
             className="headline"
@@ -70,7 +69,6 @@ export function Masthead({ tenants, selectedTenantId, onChange }: Props) {
           </div>
         </div>
 
-        {/* Center: date */}
         <div
           className="headline-italic text-center"
           style={{
@@ -81,7 +79,6 @@ export function Masthead({ tenants, selectedTenantId, onChange }: Props) {
           {today || " "}
         </div>
 
-        {/* Right: tenant picker */}
         <div className="flex flex-col items-end gap-1">
           <label
             className="eyebrow"

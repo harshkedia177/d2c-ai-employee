@@ -22,7 +22,7 @@ def test_compile_gmv_returns_sql_with_tenant_filter_and_citations():
 
 def test_compile_with_dimension_includes_group_by():
     q = compile_metric("aov", tenant_id="t1", dimensions=["month"])
-    assert "DATE_TRUNC('week', o.placed_at)" not in q.sql  # didn't grab the wrong dim
+    assert "DATE_TRUNC('week', o.placed_at)" not in q.sql
     assert "DATE_TRUNC('month', o.placed_at)" in q.sql
     assert "GROUP BY" in q.sql
 
@@ -87,7 +87,6 @@ def test_min_sample_size_propagated_for_pincode_metric():
 
 def test_post_rto_roas_includes_three_joins():
     q = compile_metric("post_rto_roas", tenant_id="t1", dimensions=["campaign"])
-    # joins to campaign, order, shipment
     assert q.sql.count("LEFT JOIN") >= 3 or q.sql.count("JOIN") >= 3
     assert "asd.spend" in q.sql
     assert "s.is_rto" in q.sql
@@ -97,7 +96,6 @@ def test_every_metric_compiles_without_error():
     for m in list_metrics():
         q = compile_metric(m["id"], tenant_id="t1")
         assert "tenant_id" in q.params
-        # CITATION CONTRACT: every metric MUST emit a citations projection.
         assert re.search(r"\bcitations\b", q.sql), (
             f"metric {m['id']} did not project citations — citation contract broken"
         )

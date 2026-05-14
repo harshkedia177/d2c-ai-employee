@@ -1,22 +1,4 @@
-"""Idempotent end-to-end bootstrap for the docker compose path.
-
-Runs sequentially inside one container:
-  1. alembic upgrade head           (schema)
-  2. pull connector data            (raw.*, enqueues into control.queue_realtime)
-  3. wait for the worker to drain   (core.* populated)
-  4. run cron agents                (core.agent_runs populated)
-  5. embed few_shot_examples        (semantic search ready)
-
-Safe to re-run. Skips steps whose effects are already visible:
-  - pull is skipped if control.connector_state shows a recent run
-  - embed is skipped if core.few_shot_examples already has rows under v1
-
-The worker is a separate container; this script just waits for the queue
-to drain. We don't spawn subprocesses — that's compose's job.
-
-Exits 0 on success so docker compose's `service_completed_successfully`
-gate releases the dependent services (api, chat-ui).
-"""
+"""Idempotent end-to-end bootstrap for the docker compose path."""
 
 from __future__ import annotations
 
@@ -88,7 +70,6 @@ async def _wait_for_queue_drain() -> None:
 
 
 async def _step_pull() -> None:
-    """Pull connector data. Skips if control.connector_state already has rows for the tenant."""
     existing = await _connector_state_count(DEMO_TENANT_ID)
     if existing > 0:
         log.info(

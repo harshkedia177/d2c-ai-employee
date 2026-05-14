@@ -1,10 +1,4 @@
-"""One-button demo orchestrator.
-
-Spawns the worker, runs the connector pull, waits for the queue to drain,
-then runs the cron agents. Prints a summary of what landed.
-
-Prerequisites: docker compose up -d postgres redis mock_saas; alembic upgrade head.
-"""
+"""One-button demo orchestrator."""
 
 from __future__ import annotations
 
@@ -17,7 +11,6 @@ import sys
 import time
 from pathlib import Path
 
-# Ensure the repo root is on sys.path so `import packages.*` works when run as a script.
 _ROOT_FOR_IMPORT = Path(__file__).parent.parent
 if str(_ROOT_FOR_IMPORT) not in sys.path:
     sys.path.insert(0, str(_ROOT_FOR_IMPORT))
@@ -37,7 +30,6 @@ DEMO_TENANT_ID = "00000000-0000-0000-0000-000000000001"
 
 
 def _ensure_mock_seed() -> None:
-    """Generate mock_saas seed JSON files if they don't exist."""
     seed_dir = ROOT / "mock_saas" / "seed" / "data"
     expected = seed_dir / "m000_shopify_orders.json"
     if expected.exists():
@@ -78,7 +70,6 @@ async def _pull_data() -> None:
 
 
 async def _wait_for_queue_drain(timeout_s: int = 180) -> None:
-    """Poll control.queue_realtime until count of unfinished jobs == 0."""
     log.info("waiting for queue to drain (timeout %ds)", timeout_s)
     deadline = time.time() + timeout_s
     while time.time() < deadline:

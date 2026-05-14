@@ -18,7 +18,6 @@ def load(merchant: str, name: str) -> list[dict]:
 app = FastAPI(title="mock-saas")
 
 
-# ---- Shopify ----
 @app.get("/shopify/{merchant}/admin/api/2026-01/orders.json")
 def shopify_orders(
     merchant: str,
@@ -31,7 +30,6 @@ def shopify_orders(
     return {"orders": rows[:limit]}
 
 
-# ---- Meta ----
 @app.get("/meta/v19.0/act_{ad_account}/insights")
 def meta_insights(
     ad_account: str,
@@ -48,7 +46,6 @@ def meta_campaigns(ad_account: str):
     return {"data": load(ad_account, "meta_campaigns")}
 
 
-# ---- Shiprocket ----
 @app.post("/shiprocket/v1/external/auth/login")
 def sr_login():
     return {"token": "mock-shiprocket-token", "expires_in": 240 * 3600}

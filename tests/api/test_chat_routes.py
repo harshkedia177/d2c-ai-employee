@@ -1,7 +1,3 @@
-"""Test the chat route with a FakeLLMClient injected via monkeypatch."""
-
-from __future__ import annotations
-
 import uuid
 
 import pytest
@@ -63,7 +59,6 @@ async def test_chat_route_returns_text_and_footnotes(monkeypatch):
             LLMResponse(text="GMV is {{m:gmv_0}}."),
         ]
     )
-    # Inject the fake LLM
     monkeypatch.setattr("packages.api.chat_routes._llm", lambda: fake)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -79,7 +74,7 @@ async def test_chat_route_returns_text_and_footnotes(monkeypatch):
 async def test_chat_route_rejects_invalid_payload():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         r = await ac.post("/chat", json={"message": "missing tenant_id"})
-    assert r.status_code == 422  # Pydantic validation error
+    assert r.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -102,7 +97,6 @@ async def test_chat_route_returns_refusal_when_verifier_exhausted(monkeypatch):
     assert r.status_code == 200
     data = r.json()
     assert data["status"] == "refused_verifier_exhausted"
-    # ensure no literal numerals leaked
     from packages.chat.verifier import find_violations
 
     assert find_violations(data["text"], frozenset()) == []

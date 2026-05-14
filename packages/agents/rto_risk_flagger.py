@@ -1,14 +1,4 @@
-"""RTO Risk Flagger — the hero agent.
-
-Trigger: Shopify orders/create webhook for COD orders.
-Decision: weighted rule-stack score → 3 bands (LOW/MED/HIGH).
-Action: proposes (never executes) a band-appropriate friction step.
-
-Why a transparent rule-stack instead of an ML model: a Mumbai D2C founder
-needs to argue with the score ("pincode 110084 has 34% RTO over 87 orders,
-customer has 1/2 prior RTOs") before they trust it. A black-box XGBoost
-output is unactionable at v0. Marginal accuracy < explainability.
-"""
+"""RTO Risk Flagger."""
 
 from __future__ import annotations
 
@@ -35,7 +25,6 @@ from packages.warehouse.db import SessionLocal
 log = logging.getLogger(__name__)
 
 
-# Feature weights (sum to 1.0). Plain numbers so a founder can edit them.
 WEIGHTS = {
     "pincode_rto_rate": 0.35,
     "customer_prior_rto_rate": 0.25,
@@ -45,21 +34,18 @@ WEIGHTS = {
     "time_of_day_risk": 0.05,
 }
 
-COLD_START_PRIOR = 0.15  # used when customer has no prior orders
-COLD_START_PINCODE_THRESHOLD = 20  # below this, fall back to district rate
+COLD_START_PRIOR = 0.15
+COLD_START_PINCODE_THRESHOLD = 20
 
 LOW_THRESHOLD = 0.25
 MED_THRESHOLD = 0.45
 
-# Expected savings per band (₹ per order avoided RTO)
 SAVINGS_HIGH = 240.0
 SAVINGS_MED = 80.0
 
 
 @dataclass(frozen=True)
 class RTOFeatures:
-    """Snapshot of the 6 features used by the agent."""
-
     pincode_rto_rate: float
     customer_prior_rto_rate: float
     sku_basket_rto_rate: float
@@ -83,13 +69,6 @@ class RTOFeatures:
 
 
 def _score(features: RTOFeatures) -> float:
-    """Linear weighted sum, clamped to [0, 1].
-
-    Defensive saturation: if any input feature exceeds the unit interval
-    (e.g., a buggy upstream returns 2.0 for an RTO rate), clamp the whole
-    score to 1.0 so a downstream consumer never silently underweights a
-    blown-out signal.
-    """
     raw_inputs = (
         features.pincode_rto_rate,
         features.customer_prior_rto_rate,
@@ -124,10 +103,6 @@ def _band(score: float) -> str:
 
 
 def _address_quality_score(address1: str | None, city: str | None) -> float:
-    """Crude address-quality heuristic. 0.0 = clean, 1.0 = suspicious.
-
-    Catches PG/hostel/resort hits, very short addresses, and missing city.
-    """
     if not address1:
         return 1.0
     addr = address1.lower()
@@ -141,7 +116,6 @@ def _address_quality_score(address1: str | None, city: str | None) -> float:
 
 
 def _time_of_day_risk(placed_at_iso: str | None) -> float:
-    """Late-night impulse window (10pm–4am IST) gets 1.0; otherwise 0.0."""
     if not placed_at_iso:
         return 0.0
     try:
@@ -155,11 +129,6 @@ def _time_of_day_risk(placed_at_iso: str | None) -> float:
 
 
 def _cart_value_zscore(cart_value: float, pincode_avg: float = 1500.0) -> float:
-    """Toy z-score: how much above/below the pincode mean (₹1,500 default).
-
-    Returns clamped [0, 1] — risky-high carts (>3× mean) score 1.0;
-    typical carts score ~0.3.
-    """
     if pincode_avg <= 0:
         return 0.0
     ratio = cart_value / pincode_avg
@@ -176,17 +145,13 @@ class RTORiskFlagger:
         cart_value = float(order.get("total_price") or 0)
         sku_list = [li.get("sku") for li in (order.get("line_items") or [])]
 
-        # 1. Pincode RTO rate
         pincode_rate, pincode_n, pincode_citations = await self._pincode_rto_rate(
             ctx.tenant_id, pincode
         )
-        # 2. Customer prior RTO rate
         cust_rate, cust_n, cust_citations = await self._customer_prior_rto(
             ctx.tenant_id, order.get("customer", {}).get("id")
         )
-        # 3. SKU RTO rate
         sku_rate, sku_citations = await self._sku_rto_rate(ctx.tenant_id, sku_list)
-        # 4-6: cheap heuristics, no DB calls
         cart_z = _cart_value_zscore(cart_value)
         addr_quality = _address_quality_score(
             (order.get("shipping_address") or {}).get("address1"),
@@ -273,8 +238,6 @@ class RTORiskFlagger:
         await write_run_log(log_entry)
         return log_entry
 
-    # ---------- Helpers ----------
-
     async def _pincode_rto_rate(
         self, tenant_id: str, pincode: str | None
     ) -> tuple[float, int, list[dict]]:
@@ -302,13 +265,6 @@ class RTORiskFlagger:
     async def _customer_prior_rto(
         self, tenant_id: str, customer_id: Any
     ) -> tuple[float, int, list[dict]]:
-        """Real customer RTO history: count prior shipments for this customer
-        and what fraction were RTO.
-
-        customer_id is the source-system Shopify customer id. We map it to the
-        canonical_id via the same UUIDv5 derivation the normalizer uses, then
-        join shipments through orders.
-        """
         if not customer_id:
             return 0.0, 0, []
         customer_canonical = canonical_id(tenant_id, "customer", "shopify", str(customer_id))
@@ -346,13 +302,6 @@ class RTORiskFlagger:
     async def _sku_rto_rate(
         self, tenant_id: str, sku_list: list[str | None]
     ) -> tuple[float, list[dict]]:
-        """Real SKU basket RTO rate: average RTO rate across the SKUs in this
-        order's basket, weighted by historical shipments containing each SKU.
-
-        Joins core.order_line → core.order → core.shipment to find the RTO
-        incidence of each SKU across all historical shipments. Returns the
-        arithmetic mean over the basket's SKUs (skipping SKUs with no history).
-        """
         skus = [s for s in (sku_list or []) if s]
         if not skus:
             return 0.0, []
@@ -387,7 +336,6 @@ class RTORiskFlagger:
             rows = list(result.mappings())
         if not rows:
             return 0.0, []
-        # Arithmetic mean of per-SKU rates (skipping SKUs with no history).
         valid = [r for r in rows if r["n"] and r["n"] > 0]
         if not valid:
             return 0.0, []
