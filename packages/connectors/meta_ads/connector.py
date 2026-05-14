@@ -11,6 +11,7 @@ from packages.connectors.base import (
     CheckResult,
     Record,
     StreamSpec,
+    acquire,
 )
 from packages.connectors.meta_ads.schemas import SCHEMAS
 
@@ -21,9 +22,7 @@ class MetaAdsConnector:
 
     def check(self, config: dict[str, Any]) -> CheckResult:
         try:
-            rl = config.get("rate_limiter")
-            if rl is not None:
-                rl.acquire_sync()
+            acquire(config)
             r = httpx.get(
                 f"{config['base_url']}/v19.0/act_{config['ad_account']}/campaigns",
                 params={"access_token": config.get("access_token", "")},
@@ -64,9 +63,7 @@ class MetaAdsConnector:
 
     def _read_campaigns(self, config: dict[str, Any]) -> Iterator[Record | Checkpoint]:
         url = f"{config['base_url']}/v19.0/act_{config['ad_account']}/campaigns"
-        rl = config.get("rate_limiter")
-        if rl is not None:
-            rl.acquire_sync()
+        acquire(config)
         r = httpx.get(
             url,
             params={"access_token": config["access_token"]},
@@ -94,9 +91,7 @@ class MetaAdsConnector:
         max_seen = last_date
 
         while True:
-            rl = config.get("rate_limiter")
-            if rl is not None:
-                rl.acquire_sync()
+            acquire(config)
             r = httpx.get(
                 url,
                 params={

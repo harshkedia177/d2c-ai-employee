@@ -9,7 +9,7 @@ type Filter = { id: string | null; label: string };
 const FILTERS: Filter[] = [
   { id: null, label: "All" },
   { id: "rto_risk_flagger", label: "RTO Risk Flagger" },
-  { id: "meta_campaign_pauser", label: "Meta Pauser" },
+  { id: "meta_pauser", label: "Meta Pauser" },
   { id: "pincode_cod_blocker", label: "Pincode COD Blocker" },
 ];
 
@@ -483,7 +483,7 @@ function PincodeBlockerBody({ run }: { run: AgentRun }) {
 
 function RunBlock({ run }: { run: AgentRun }) {
   let body: React.ReactNode = null;
-  if (run.agent_id === "meta_campaign_pauser") {
+  if (run.agent_id === "meta_pauser") {
     body = <MetaPauserBody run={run} />;
   } else if (run.agent_id === "pincode_cod_blocker") {
     body = <PincodeBlockerBody run={run} />;

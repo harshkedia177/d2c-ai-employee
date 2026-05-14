@@ -121,6 +121,17 @@ def _json_default(o: Any) -> Any:
     return str(o)
 
 
+async def propose_run(
+    agent_id: str,
+    ctx: AgentContext,
+    decision: Decision,
+    evidence: Evidence,
+) -> RunLog:
+    log_entry = make_run_log(agent_id=agent_id, ctx=ctx, evidence=evidence, decision=decision)
+    await write_run_log(log_entry)
+    return log_entry
+
+
 def make_run_log(
     agent_id: str,
     ctx: AgentContext,

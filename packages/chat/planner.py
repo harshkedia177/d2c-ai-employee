@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import datetime as _dt
 import logging
-import re
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
 from packages.chat.renderer import RenderResult, render
 from packages.chat.tools import TOOL_REGISTRY, TOOL_SCHEMAS
-from packages.chat.verifier import find_violations
+from packages.chat.verifier import NUMERAL_RE, find_violations
 from packages.llm.client import LLMClient, LLMResponse
 
 log = logging.getLogger(__name__)
@@ -128,7 +127,6 @@ async def chat_turn(
                     serialized_rows = (
                         tool_payload.get("rows") if isinstance(tool_payload, dict) else []
                     ) or []
-                    _num_re = re.compile(r"\b\d[\d,]*(?:\.\d+)?\b")
                     for i, srow in enumerate(serialized_rows):
                         pkey = f"{metric_id}_{base_n}_{i}"
                         per_row_result = {
@@ -152,7 +150,7 @@ async def chat_turn(
                                 continue
                             sv = str(v)
                             permitted_literals.add(sv)
-                            for _m in _num_re.finditer(sv):
+                            for _m in NUMERAL_RE.finditer(sv):
                                 permitted_literals.add(_m.group())
                         rows_out.append({**srow, "placeholder": f"{{{{m:{pkey}}}}}"})
                     metric_counter[metric_id] = base_n + len(rows_out)

@@ -56,7 +56,7 @@ class TokenBucket:
         self.capacity = capacity
 
     @classmethod
-    async def for_source(
+    def for_source(
         cls,
         redis_url: str,
         tenant_id: str,
@@ -72,23 +72,7 @@ class TokenBucket:
             capacity=capacity,
         )
 
-    @classmethod
-    def for_source_sync(
-        cls,
-        redis_url: str,
-        tenant_id: str,
-        source: str,
-    ) -> TokenBucket:
-        """Sync version of ``for_source`` for non-async callers."""
-        if source not in DEFAULT_RATES:
-            raise ValueError(f"no default rate for source={source}")
-        refill, capacity = DEFAULT_RATES[source]
-        return cls(
-            redis_url=redis_url,
-            key=f"bucket:{tenant_id}:{source}",
-            refill_per_sec=refill,
-            capacity=capacity,
-        )
+    for_source_sync = for_source
 
     async def _ensure_script(self) -> str:
         sha = self._scripts.get(LUA)

@@ -6,10 +6,9 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from packages.chat.verifier import NUMERAL_RE
+
 PLACEHOLDER_RE = re.compile(r"\{\{m:([a-zA-Z0-9_]+)\}\}")
-# Mirrors verifier's NUMERAL_RE so we register every numeral substring the
-# verifier will see inside formatted outputs (e.g. inside "₹4,82,310").
-NUMERAL_RE_PLAIN = re.compile(r"\b\d[\d,]*(?:\.\d+)?\b")
 
 
 @dataclass(frozen=True)
@@ -95,9 +94,7 @@ def render(
             used.add(str(value))
             if isinstance(value, float) and value.is_integer():
                 used.add(str(int(value)))
-        # Verifier scans with \b\d[\d,]*(?:\.\d+)?\b which matches numerals
-        # inside formatted strings (e.g. "4,82,310" inside "₹4,82,310").
-        for m in NUMERAL_RE_PLAIN.finditer(formatted):
+        for m in NUMERAL_RE.finditer(formatted):
             used.add(m.group())
         prov = result.get("provenance") or {}
         footnotes.append(

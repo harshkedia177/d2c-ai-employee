@@ -10,8 +10,7 @@ from packages.agents.base import (
     Evidence,
     RunLog,
     TriggerSpec,
-    make_run_log,
-    write_run_log,
+    propose_run,
 )
 
 PAUSE_ROAS_THRESHOLD = 0.7
@@ -104,11 +103,4 @@ class MetaPauser:
         )
 
     async def propose(self, ctx: AgentContext, decision: Decision, evidence: Evidence) -> RunLog:
-        log_entry = make_run_log(
-            agent_id=self.agent_id,
-            ctx=ctx,
-            evidence=evidence,
-            decision=decision,
-        )
-        await write_run_log(log_entry)
-        return log_entry
+        return await propose_run(self.agent_id, ctx, decision, evidence)

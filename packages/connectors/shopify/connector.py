@@ -11,6 +11,7 @@ from packages.connectors.base import (
     CheckResult,
     Record,
     StreamSpec,
+    acquire,
 )
 from packages.connectors.shopify.schemas import SCHEMAS
 
@@ -21,9 +22,7 @@ class ShopifyConnector:
 
     def check(self, config: dict[str, Any]) -> CheckResult:
         try:
-            rl = config.get("rate_limiter")
-            if rl is not None:
-                rl.acquire_sync()
+            acquire(config)
             r = httpx.get(
                 f"{config['base_url']}/{config['merchant']}/admin/api/2026-01/orders.json",
                 params={"limit": 1},
@@ -100,9 +99,7 @@ class ShopifyConnector:
         seen_skus: set[str] = set()
 
         while True:
-            rl = config.get("rate_limiter")
-            if rl is not None:
-                rl.acquire_sync()
+            acquire(config)
             r = httpx.get(url, params=params, timeout=10.0)
             r.raise_for_status()
             orders = r.json().get("orders", [])

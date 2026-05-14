@@ -99,7 +99,7 @@ async def test_concurrent_workers_atomic_acquire():
 
 @pytest.mark.asyncio
 async def test_for_source_uses_default_rates():
-    b = await TokenBucket.for_source(REDIS_URL, "t-test", "shiprocket")
+    b = TokenBucket.for_source(REDIS_URL, "t-test", "shiprocket")
     try:
         assert b.refill == DEFAULT_RATES["shiprocket"][0]
         assert b.capacity == DEFAULT_RATES["shiprocket"][1]
@@ -111,7 +111,7 @@ async def test_for_source_uses_default_rates():
 @pytest.mark.asyncio
 async def test_for_source_rejects_unknown_source():
     with pytest.raises(ValueError):
-        await TokenBucket.for_source(REDIS_URL, "t-test", "tiktok_ads")
+        TokenBucket.for_source(REDIS_URL, "t-test", "tiktok_ads")
 
 
 def test_acquire_sync_blocks_until_tokens_refill():

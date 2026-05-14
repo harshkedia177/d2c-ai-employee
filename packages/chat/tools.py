@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+from collections import OrderedDict
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -21,8 +22,9 @@ from packages.warehouse.db import SessionLocal
 
 log = logging.getLogger(__name__)
 
-# query_hash → CompiledQuery, used by get_provenance.
-_QUERY_CACHE: dict[str, dict[str, Any]] = {}
+# query_hash → CompiledQuery, used by get_provenance. Bounded LRU.
+_QUERY_CACHE_MAX = 512
+_QUERY_CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
 
 # Tests may monkeypatch _get_embeddings_client to inject a fake.
 _embeddings_client: Any | None = None
@@ -158,6 +160,9 @@ async def compute_metric(
         "dimensions": dimensions or [],
         "filters": coerced,
     }
+    _QUERY_CACHE.move_to_end(cq.query_hash)
+    while len(_QUERY_CACHE) > _QUERY_CACHE_MAX:
+        _QUERY_CACHE.popitem(last=False)
 
     async with SessionLocal() as s:
         result = await s.execute(text(cq.sql), cq.params)

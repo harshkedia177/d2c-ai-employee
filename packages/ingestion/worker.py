@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 import signal
+from datetime import date as _date
 from datetime import datetime
 from typing import Any
 
@@ -225,8 +226,6 @@ async def _handle_connector_record(job: dict[str, Any]) -> None:
             core_row[field] = _parse_ts(core_row[field])
 
     if entity == "ad_spend_daily" and isinstance(core_row.get("date"), str):
-        from datetime import date as _date
-
         core_row["date"] = _date.fromisoformat(core_row["date"][:10])
 
     async with SessionLocal() as s:

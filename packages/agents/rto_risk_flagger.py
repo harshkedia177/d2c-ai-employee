@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -15,8 +16,7 @@ from packages.agents.base import (
     Evidence,
     RunLog,
     TriggerSpec,
-    make_run_log,
-    write_run_log,
+    propose_run,
 )
 from packages.chat.tools import compute_metric
 from packages.udm.xref import canonical_id
@@ -145,13 +145,15 @@ class RTORiskFlagger:
         cart_value = float(order.get("total_price") or 0)
         sku_list = [li.get("sku") for li in (order.get("line_items") or [])]
 
-        pincode_rate, pincode_n, pincode_citations = await self._pincode_rto_rate(
-            ctx.tenant_id, pincode
+        (
+            (pincode_rate, pincode_n, pincode_citations),
+            (cust_rate, cust_n, cust_citations),
+            (sku_rate, sku_citations),
+        ) = await asyncio.gather(
+            self._pincode_rto_rate(ctx.tenant_id, pincode),
+            self._customer_prior_rto(ctx.tenant_id, order.get("customer", {}).get("id")),
+            self._sku_rto_rate(ctx.tenant_id, sku_list),
         )
-        cust_rate, cust_n, cust_citations = await self._customer_prior_rto(
-            ctx.tenant_id, order.get("customer", {}).get("id")
-        )
-        sku_rate, sku_citations = await self._sku_rto_rate(ctx.tenant_id, sku_list)
         cart_z = _cart_value_zscore(cart_value)
         addr_quality = _address_quality_score(
             (order.get("shipping_address") or {}).get("address1"),
@@ -223,20 +225,8 @@ class RTORiskFlagger:
             expected_savings_inr=savings,
         )
 
-    async def propose(
-        self,
-        ctx: AgentContext,
-        decision: Decision,
-        evidence: Evidence,
-    ) -> RunLog:
-        log_entry = make_run_log(
-            agent_id=self.agent_id,
-            ctx=ctx,
-            evidence=evidence,
-            decision=decision,
-        )
-        await write_run_log(log_entry)
-        return log_entry
+    async def propose(self, ctx: AgentContext, decision: Decision, evidence: Evidence) -> RunLog:
+        return await propose_run(self.agent_id, ctx, decision, evidence)
 
     async def _pincode_rto_rate(
         self, tenant_id: str, pincode: str | None

@@ -54,6 +54,12 @@ class CheckResult:
     message: str = ""
 
 
+def acquire(config: dict[str, Any]) -> None:
+    rl = config.get("rate_limiter")
+    if rl is not None:
+        rl.acquire_sync()
+
+
 @runtime_checkable
 class Connector(Protocol):
     source_system: str

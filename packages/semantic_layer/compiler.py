@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ class CompiledQuery:
     min_sample_size: int = 0
 
 
+@lru_cache(maxsize=1)
 def _load_config() -> dict[str, Any]:
     return yaml.safe_load(CONFIG_PATH.read_text())
 

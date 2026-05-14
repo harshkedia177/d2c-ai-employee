@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import text
 
 from packages.agents.base import AgentContext, RunLog
-from packages.agents.meta_pauser import MetaPauser
+from packages.agents.meta_pauser import LEARNING_PHASE_MIN_CONVERSIONS, MetaPauser
 from packages.agents.pincode_cod_blocker import PincodeCodBlocker
 from packages.warehouse.db import SessionLocal
 
@@ -138,7 +138,7 @@ async def run_meta_pauser_for_tenant(
             "attributed_revenue": float(r["attributed_revenue"] or 0),
             "rto_adjusted_revenue": float(r["rto_adjusted_revenue"] or 0),
             "conversions": int(r["conversions"] or 0),
-            "learning_phase": int(r["conversions"] or 0) < 50,
+            "learning_phase": int(r["conversions"] or 0) < LEARNING_PHASE_MIN_CONVERSIONS,
         }
         for r in rows
     ]

@@ -20,19 +20,20 @@ class VerifierError(ValueError):
         self.violations = all_violations
 
 
+def find_violations(text: str, substituted_values: frozenset[str] | set[str]) -> list[dict]:
+    return [
+        {
+            "numeral": m.group(),
+            "offset": m.start(),
+            "context": text[max(0, m.start() - 30) : m.end() + 30],
+        }
+        for m in NUMERAL_RE.finditer(text)
+        if m.group() not in substituted_values
+    ]
+
+
 def verify_no_uncited_numerals(text: str, substituted_values: frozenset[str] | set[str]) -> None:
-    """Raise VerifierError if any literal numeral isn't in substituted_values."""
-    violations: list[dict] = []
-    for m in NUMERAL_RE.finditer(text):
-        n = m.group()
-        if n not in substituted_values:
-            violations.append(
-                {
-                    "numeral": n,
-                    "offset": m.start(),
-                    "context": text[max(0, m.start() - 30) : m.end() + 30],
-                }
-            )
+    violations = find_violations(text, substituted_values)
     if violations:
         first = violations[0]
         raise VerifierError(
@@ -41,19 +42,3 @@ def verify_no_uncited_numerals(text: str, substituted_values: frozenset[str] | s
             context=first["context"],
             all_violations=violations,
         )
-
-
-def find_violations(text: str, substituted_values: frozenset[str] | set[str]) -> list[dict]:
-    """Non-raising variant — returns a list of violations (empty if clean)."""
-    out: list[dict] = []
-    for m in NUMERAL_RE.finditer(text):
-        n = m.group()
-        if n not in substituted_values:
-            out.append(
-                {
-                    "numeral": n,
-                    "offset": m.start(),
-                    "context": text[max(0, m.start() - 30) : m.end() + 30],
-                }
-            )
-    return out
