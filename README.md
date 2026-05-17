@@ -18,16 +18,6 @@ Drop real `SHOPIFY_ACCESS_TOKEN` / `META_ACCESS_TOKEN` / `SHIPROCKET_EMAIL+PASSW
 
 ---
 
-## What I built (5-line summary)
-
-- **Connectors:** Shopify Admin + Meta Marketing + Shiprocket behind one `Connector` Protocol. Real-API mode (documented auth + cursor pagination) or local `mock_saas` mode per connector, decided by which env vars are set.
-- **UDM:** Two-layer Postgres — `raw.*` JSONB landing, `core.*` typed canonical. **9 provenance columns NOT NULL on every core row.** Cross-source identity via deterministic UUIDv5 `canonical_id`. Hash-partitioned by `tenant_id` from day one.
-- **Chat:** LLMCompiler-shaped pipeline — **Plan → Parallel-Execute → Join → Stream Compose**. One planner LLM call emits a typed Pydantic DAG; deterministic executor fans out tool calls via `asyncio.gather`; joiner verifies (always on); composer streams tokens with inline placeholder substitution. p95 ~5s real-Gemini vs ~18s for the legacy ReAct loop. SSE endpoint `POST /chat/stream` streams events to the UI; `POST /chat` kept as JSON shim. Citation contract enforced architecturally — placeholders → renderer → regex `Verifier` → warning event on violation.
-- **Agents:** 3 agents on one `Agent` Protocol (RTO Risk Flagger, Meta Pauser, Pincode COD Blocker). All propose-only. Every run persists `reasoning`, `score`, `band`, `expected_savings_inr`, and `cited_provenance` to `core.agent_runs`.
-- **Scale harness:** Per-tenant Redis Lua-atomic token bucket, two-queue task system (realtime + backfill) with `SKIP LOCKED`, non-blocking webhook ingress (~4ms median), 16 hash partitions on every fast-growing table. 246 tests including an eval harness over 12 golden + 10 red-team prompts.
-
----
-
 ## Architecture
 
 ```
@@ -96,7 +86,17 @@ One chat turn (SSE): planner emits a `Plan` of tool tasks → executor fans them
 
 ---
 
-## Connectors — why these 3
+## 1. What I built (5-line summary)
+
+- **Connectors:** Shopify Admin + Meta Marketing + Shiprocket behind one `Connector` Protocol. Real-API mode (documented auth + cursor pagination) or local `mock_saas` mode per connector, decided by which env vars are set.
+- **UDM:** Two-layer Postgres — `raw.*` JSONB landing, `core.*` typed canonical. **9 provenance columns NOT NULL on every core row.** Cross-source identity via deterministic UUIDv5 `canonical_id`. Hash-partitioned by `tenant_id` from day one.
+- **Chat:** LLMCompiler-shaped pipeline — **Plan → Parallel-Execute → Join → Stream Compose**. One planner LLM call emits a typed Pydantic DAG; deterministic executor fans out tool calls via `asyncio.gather`; joiner verifies (always on); composer streams tokens with inline placeholder substitution. p95 ~5s real-Gemini vs ~18s for the legacy ReAct loop. SSE endpoint `POST /chat/stream` streams events to the UI; `POST /chat` kept as JSON shim. Citation contract enforced architecturally — placeholders → renderer → regex `Verifier` → warning event on violation.
+- **Agents:** 3 agents on one `Agent` Protocol (RTO Risk Flagger, Meta Pauser, Pincode COD Blocker). All propose-only. Every run persists `reasoning`, `score`, `band`, `expected_savings_inr`, and `cited_provenance` to `core.agent_runs`.
+- **Scale harness:** Per-tenant Redis Lua-atomic token bucket, two-queue task system (realtime + backfill) with `SKIP LOCKED`, non-blocking webhook ingress (~4ms median), 16 hash partitions on every fast-growing table. 246 tests including an eval harness over 12 golden + 10 red-team prompts.
+
+---
+
+## 2. Connectors — why these 3
 
 - **Shopify** — orders, COGS, COD-vs-prepaid split, customers.
 - **Meta Marketing** — campaign/ad spend with attributed conversions.
@@ -108,7 +108,7 @@ One shared Protocol in `packages/connectors/base.py:67-81` (`check / streams / r
 
 ---
 
-## Schema — why this shape
+## 3. Schema — why this shape
 
 - **Two layers, no marts:** `raw.<source>_<stream>` (immutable JSONB landing, append-only) → `core.<entity>` (typed canonical). Canonical + on-demand SQL handles current query latency; dragging in dbt before it actually hurts is the kind of scaffolding that freezes in place.
 - **9 mandatory provenance columns on every `core.*` row** (`source_system, source_id, source_record_url, raw_table, raw_row_id, raw_payload_hash, fetched_at, ingested_at, connector_version`), 8 of 9 enforced `NOT NULL` at the schema layer. Source-agnostic vocabulary (Segment Ecommerce + Shopify-shaped names) — adding Magento next quarter doesn't reshape downstream consumers.
@@ -119,7 +119,7 @@ One shared Protocol in `packages/connectors/base.py:67-81` (`check / streams / r
 
 ---
 
-## Chat — citation contract, enforced
+## 4. Chat — tool schema + how citation works
 
 **7 tools exposed to the planner** (`packages/chat/tools.py`):
 
@@ -148,7 +148,7 @@ We use a semantic layer (8 metrics) instead of raw text-to-SQL because Spider 2.
 
 ---
 
-## Agent — what it does, why
+## 5. Agent — what it does, why this one
 
 **RTO Risk Flagger** is the hero (webhook-triggered, the "AI employee" the brief asks for). Two other agents (Meta Pauser, Pincode COD Blocker) ship under the same `Agent` Protocol to prove the abstraction.
 
@@ -166,7 +166,7 @@ We use a semantic layer (8 metrics) instead of raw text-to-SQL because Spider 2.
 
 ---
 
-## Scale — 1 → 10k merchants
+## 6. Scale — 1 → 10k merchants
 
 **What breaks first:** rate-limit pressure on third-party APIs during onboarding waves, not webhook volume. Shiprocket doesn't publish per-plan request quotas, tokens expire every 240h, and there's no bulk-export endpoint — 50 simultaneous merchant onboardings each backfilling 90 days starts getting rejected.
 
@@ -183,7 +183,7 @@ We use a semantic layer (8 metrics) instead of raw text-to-SQL because Spider 2.
 
 ---
 
-## Eval — where it breaks
+## 7. Eval — where it breaks
 
 See [`eval-honesty.md`](./eval-honesty.md). Top items the reviewer should hear from me first:
 
@@ -194,23 +194,14 @@ See [`eval-honesty.md`](./eval-honesty.md). Top items the reviewer should hear f
 
 ---
 
-## What I explicitly did NOT build
-
-- **Marts layer (dbt-style)** — premature.
-- **Interactive App-Store-style OAuth flows** — credential-based auth (Shopify Custom App token, Meta System User token, Shiprocket API user) is what production looks like for a per-merchant deployment.
-- **Auto-execution of writes** — brief says no. `propose_write(dry_run=False)` errors out.
-- **Multi-currency beyond INR** — Indian D2C focus.
-
----
-
-## Hours / AI tool disclosure
+## 8. Hours / AI tool disclosure
 
 - **Time:** built across the May 10 → May 14 window in 3–4 working sessions.
 - **AI tools:** Claude / GPT-class models used heavily as a pair-programmer. I drove all architecture decisions (which 3 connectors, two-layer UDM, citation contract enforced via regex verifier, propose-only agents, harness shape) and the eval/test strategy. The LLM wrote most of the implementation under tight per-file review. The README + eval-honesty are my framing; LLM helped tighten prose. Commit history is the receipt.
 
 ---
 
-## What I'd do with another week
+## 9. What I'd do with another week
 
 1. Run real load — 1k synthetic tenants, measure p95 chat latency + worker queue depth under concurrency (single-tenant p95 is already measured: 4.91s real-Gemini, see `scripts/bench_chat_latency.py`).
 2. Build the **cell router** (2k merchants/cell). Hash partitions are ready for it.
@@ -219,6 +210,15 @@ See [`eval-honesty.md`](./eval-honesty.md). Top items the reviewer should hear f
 5. **Token rotation worker** (Shiprocket 240h, Meta 60d).
 6. **Per-merchant tuning UI** for agent thresholds — the linear-weighted-score design only works if the founder can tune it.
 7. **Bulk Operations** for Shopify backfill.
+
+---
+
+## What I explicitly did NOT build
+
+- **Marts layer (dbt-style)** — premature.
+- **Interactive App-Store-style OAuth flows** — credential-based auth (Shopify Custom App token, Meta System User token, Shiprocket API user) is what production looks like for a per-merchant deployment.
+- **Auto-execution of writes** — brief says no. `propose_write(dry_run=False)` errors out.
+- **Multi-currency beyond INR** — Indian D2C focus.
 
 ---
 
@@ -268,4 +268,3 @@ apps/chat-ui/       # Next.js 16 / React 19 chat surface; SSE consumer
 evals/              # 12 golden + 10 red-team + bench prompts + citation contract harness
 tests/              # 246 tests mirroring packages/* paths
 ```
-
