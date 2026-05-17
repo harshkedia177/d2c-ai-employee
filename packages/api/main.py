@@ -13,9 +13,10 @@ logging.basicConfig(
 )
 logging.getLogger("packages").setLevel(logging.INFO)
 
-from packages.api.chat_routes import _llm
+from packages.api.chat_routes import get_llm
 from packages.api.chat_routes import router as chat_router
 from packages.api.run_log_routes import router as runs_router
+from packages.api.trigger_routes import router as triggers_router
 from packages.api.webhook_routes import router as webhook_router
 from packages.config import settings
 
@@ -23,7 +24,7 @@ from packages.config import settings
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     if settings.gemini_api_key:
-        _llm()._ensure_client()
+        get_llm()._ensure_client()  # type: ignore[attr-defined]
     yield
 
 
@@ -39,6 +40,7 @@ app.add_middleware(
 app.include_router(webhook_router)
 app.include_router(chat_router)
 app.include_router(runs_router)
+app.include_router(triggers_router)
 
 
 @app.get("/health")

@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const ITEMS: { href: string; label: string }[] = [
-  { href: "/", label: "Conversation" },
-  { href: "/runs", label: "Agent Bench" },
-  { href: "/metrics", label: "Metrics" },
+const ITEMS: { href: string; label: string; hint?: string }[] = [
+  { href: "/", label: "Chat", hint: "Cited Q&A" },
+  { href: "/runs", label: "Agent Runs", hint: "Proposed actions" },
+  { href: "/metrics", label: "Semantic Layer", hint: "Metrics & dims" },
 ];
 
 export function Nav() {
@@ -14,35 +14,56 @@ export function Nav() {
   return (
     <nav
       style={{
-        marginLeft: "clamp(2rem, 8vw, 10rem)",
-        marginRight: "clamp(2rem, 5vw, 5rem)",
-        paddingTop: "0.75rem",
-        paddingBottom: "0.75rem",
         borderBottom: "1px solid var(--rule)",
+        background: "var(--bg)",
       }}
     >
-      <div className="font-mono" style={{ fontSize: "0.7rem", letterSpacing: "0.16em" }}>
-        {ITEMS.map((item, i) => {
+      <div
+        style={{
+          maxWidth: 1400,
+          margin: "0 auto",
+          padding: "0 clamp(1rem, 3vw, 2rem)",
+          display: "flex",
+          alignItems: "stretch",
+          gap: 4,
+          overflowX: "auto",
+        }}
+      >
+        {ITEMS.map((item) => {
           const active = pathname === item.href;
           return (
-            <span key={item.href}>
-              {i > 0 && (
-                <span style={{ color: "var(--ink-soft)", margin: "0 0.6rem" }}>·</span>
+            <Link
+              key={item.href}
+              href={item.href}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "10px 12px",
+                borderBottom: active
+                  ? "2px solid var(--accent)"
+                  : "2px solid transparent",
+                marginBottom: -1,
+                color: active ? "var(--ink)" : "var(--ink-soft)",
+                fontSize: 13,
+                fontWeight: active ? 600 : 500,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {item.label}
+              {item.hint && (
+                <span
+                  className="font-mono"
+                  style={{
+                    fontSize: 10,
+                    color: "var(--ink-dim)",
+                    letterSpacing: "0.02em",
+                  }}
+                >
+                  {item.hint}
+                </span>
               )}
-              <Link
-                href={item.href}
-                style={{
-                  color: active ? "var(--ink)" : "var(--ink-soft)",
-                  textTransform: "uppercase",
-                  textDecoration: active ? "underline" : "none",
-                  textUnderlineOffset: "4px",
-                  textDecorationThickness: "1px",
-                  textDecorationColor: "var(--ink)",
-                }}
-              >
-                {item.label}
-              </Link>
-            </span>
+            </Link>
           );
         })}
       </div>

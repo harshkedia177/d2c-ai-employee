@@ -46,5 +46,62 @@
     "plan": [
       {"tool": "compute_metric", "args": {"metric_id": "sku_rto_rate_90d", "dimensions": ["sku"]}}
     ]
+  },
+  {
+    "question": "How should I audit my campaigns this week — what's the checklist?",
+    "plan": [
+      {"tool": "compute_metric", "args": {"metric_id": "post_rto_roas", "dimensions": ["campaign"], "filters": {"date__gte": "2026-05-08"}}},
+      {"tool": "compute_metric", "args": {"metric_id": "cac", "dimensions": ["campaign"], "filters": {"date__gte": "2026-05-08"}}},
+      {"tool": "compute_metric", "args": {"metric_id": "gmv", "dimensions": ["campaign"], "filters": {"placed_at__gte": "2026-05-08"}}}
+    ]
+  },
+  {
+    "question": "Compare my RTO rate this month vs last month",
+    "plan": [
+      {"tool": "compute_metric", "args": {"metric_id": "rto_rate", "filters": {"shipped_at__gte": "2026-05-01"}}},
+      {"tool": "compute_metric", "args": {"metric_id": "rto_rate", "filters": {"shipped_at__gte": "2026-04-01", "shipped_at__lte": "2026-04-30"}}}
+    ]
+  },
+  {
+    "question": "Should I block COD for any pincodes? Walk me through the decision.",
+    "plan": [
+      {"tool": "compute_metric", "args": {"metric_id": "pincode_rto_rate_90d", "dimensions": ["pincode"]}},
+      {"tool": "compute_metric", "args": {"metric_id": "contribution_margin_per_order"}}
+    ]
+  },
+  {
+    "question": "Which SKUs are eating my margin through high returns?",
+    "plan": [
+      {"tool": "compute_metric", "args": {"metric_id": "sku_rto_rate_90d", "dimensions": ["sku"]}},
+      {"tool": "compute_metric", "args": {"metric_id": "contribution_margin_per_order"}}
+    ]
+  },
+  {
+    "question": "How much of my GMV is Cash on Delivery vs prepaid?",
+    "plan": [
+      {"tool": "compute_metric", "args": {"metric_id": "gmv", "dimensions": ["gateway"]}}
+    ]
+  },
+  {
+    "question": "Which campaigns should I pause — underperforming with high spend?",
+    "plan": [
+      {"tool": "compute_metric", "args": {"metric_id": "post_rto_roas", "dimensions": ["campaign"], "filters": {"date__gte": "2026-04-30"}}},
+      {"tool": "compute_metric", "args": {"metric_id": "cac", "dimensions": ["campaign"], "filters": {"date__gte": "2026-04-30"}}}
+    ]
+  },
+  {
+    "question": "Show me my GMV trend by week",
+    "plan": [
+      {"tool": "compute_metric", "args": {"metric_id": "gmv", "dimensions": ["week"], "filters": {"placed_at__gte": "2026-02-15"}}}
+    ]
+  },
+  {
+    "question": "What's my weekly business pulse — give me the top KPIs",
+    "plan": [
+      {"tool": "compute_metric", "args": {"metric_id": "gmv", "filters": {"placed_at__gte": "2026-05-08"}}},
+      {"tool": "compute_metric", "args": {"metric_id": "aov", "filters": {"placed_at__gte": "2026-05-08"}}},
+      {"tool": "compute_metric", "args": {"metric_id": "rto_rate", "filters": {"shipped_at__gte": "2026-05-08"}}},
+      {"tool": "compute_metric", "args": {"metric_id": "cac", "filters": {"date__gte": "2026-05-08"}}}
+    ]
   }
 ]

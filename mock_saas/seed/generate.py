@@ -15,16 +15,33 @@ Faker.seed(42)
 PINCODES_HIGH_RTO = ["110084", "201001", "302013", "700091", "560100"]
 PINCODES_LOW_RTO = ["560001", "400001", "411001", "500032", "600028"]
 
+# Seed-data window: span the 90 days ending "now" so the scheduler's recent-
+# window queries (typically the last 14d) always land on data. Computed once
+# at module load so all gen_* helpers share the same anchor.
+N_HISTORY_DAYS = 90
+_NOW = datetime.now(UTC).replace(microsecond=0)
+_SEED_END = _NOW.date()
+_SEED_BASE = _NOW - timedelta(days=N_HISTORY_DAYS - 1)
+
 
 def gen_orders(merchant_id: str, n: int = 1000) -> list[dict]:
     out: list[dict] = []
-    base = datetime(2026, 2, 1, tzinfo=UTC)
+    base = _SEED_BASE
     for i in range(n):
-        placed_at = base + timedelta(days=random.randint(0, 90), hours=random.randint(0, 23))
+        placed_at = base + timedelta(
+            days=random.randint(0, N_HISTORY_DAYS - 1),
+            hours=random.randint(0, 23),
+        )
         is_cod = random.random() < 0.65
         pincode = random.choice(PINCODES_HIGH_RTO + PINCODES_LOW_RTO)
         cart_value = round(random.uniform(499, 4999), 2)
-        utm = f"camp-{random.randint(1, 10)}"
+        # IMPORTANT: utm_campaign must match Meta's campaign `name` exactly —
+        # the scheduler joins core.order.utm_campaign = core.campaign.name to
+        # compute attributed_revenue per campaign.
+        # Bias attribution: campaigns 1–3 get fewer orders than 4–10 (so the
+        # "overspend" campaigns below land in the danger zone for Meta Pauser
+        # to actually propose pauses, not just keep). Weighted choice.
+        utm = f"Campaign {random.choices(range(1, 11), weights=[1,1,1,3,3,3,3,3,3,3])[0]}"
         if random.random() < 0.05:
             refund_amount = round(cart_value * random.uniform(0.05, 0.30), 2)
             refunded_at = placed_at + timedelta(days=random.randint(1, 14))
@@ -137,11 +154,25 @@ def gen_meta(merchant_id: str, n_campaigns: int = 10) -> tuple[list[dict], list[
         for i in range(1, n_campaigns + 1)
     ]
     insights: list[dict] = []
-    base = datetime(2026, 2, 1).date()
+    base = _SEED_BASE.date()
+    # "Overspender" campaigns get daily budgets ~3–4× the others. Combined with
+    # the lower attribution weight for campaigns 1–3 in gen_orders, this
+    # produces post-RTO ROAS in the pause/reduce zone for these campaigns —
+    # gives Meta Pauser a meaningful decision instead of a trivial "Keep all".
+    OVERSPEND_IDS = {"camp-1", "camp-2", "camp-3"}
     for c in campaigns:
-        for d in range(90):
+        is_overspend = c["id"] in OVERSPEND_IDS
+        for d in range(N_HISTORY_DAYS):
             day = base + timedelta(days=d)
-            spend = round(random.uniform(500, 5000), 2)
+            spend = (
+                round(random.uniform(8000, 18000), 2)
+                if is_overspend
+                else round(random.uniform(500, 5000), 2)
+            )
+            # Daily conversions: kept comfortably above the agent's 50/window
+            # learning-phase threshold for a 14-day window
+            # (LEARNING_PHASE_MIN_CONVERSIONS in packages/agents/meta_pauser.py).
+            # 14 × avg(8..30)=14×19=~266 conversions ≫ 50.
             # Real Graph API returns numeric metrics as strings, not ints.
             # https://developers.facebook.com/docs/marketing-api/insights/
             insights.append(
@@ -154,7 +185,7 @@ def gen_meta(merchant_id: str, n_campaigns: int = 10) -> tuple[list[dict], list[
                     "spend": str(spend),
                     "impressions": str(random.randint(2000, 50000)),
                     "clicks": str(random.randint(50, 800)),
-                    "conversions": str(random.randint(0, 30)),
+                    "conversions": str(random.randint(8, 30)),
                     "purchase_roas": [
                         {
                             "action_type": "purchase",

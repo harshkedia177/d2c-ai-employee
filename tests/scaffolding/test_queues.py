@@ -10,18 +10,15 @@ from packages.warehouse.db import SessionLocal
 
 @pytest.fixture(autouse=True)
 async def _clean_test_jobs():
+    """Truncate both queue tables before and after every test for isolation —
+    oldest-first dequeue ordering makes shared queue state cause flakes.
+    """
+    async with SessionLocal() as s:
+        await s.execute(text("TRUNCATE control.queue_realtime, control.queue_backfill"))
+        await s.commit()
     yield
     async with SessionLocal() as s:
-        await s.execute(
-            text(
-                "DELETE FROM control.queue_realtime WHERE enqueued_at < now() - interval '5 minutes'"
-            )
-        )
-        await s.execute(
-            text(
-                "DELETE FROM control.queue_backfill WHERE enqueued_at < now() - interval '5 minutes'"
-            )
-        )
+        await s.execute(text("TRUNCATE control.queue_realtime, control.queue_backfill"))
         await s.commit()
 
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import re
 from collections import OrderedDict
 from datetime import date, datetime
 from pathlib import Path
@@ -84,28 +85,64 @@ async def get_schema(tenant_id: str, entity: str | None = None) -> dict[str, Any
     }
 
 
+SEARCH_EXAMPLES_MAX_DISTANCE = 0.45  # cosine distance; >0.45 is "barely related"
+# pgvector default ef_search is 40. Bumped for 3072-dim halfvec where recall@5
+# at default is noticeably worse. Set per-session so we don't mutate global GUC.
+SEARCH_EXAMPLES_EF_SEARCH = 100
+
+
 async def search_examples(tenant_id: str, question: str, k: int = 5) -> dict[str, Any]:
     """Find curated (question, plan) examples similar to a question.
 
     Primary: halfvec cosine NN against core.few_shot_examples (HNSW index).
+    Drops matches with distance > SEARCH_EXAMPLES_MAX_DISTANCE so the LLM
+    isn't fed noise once the example store grows past a handful.
+    Tenant-scoped: returns global examples (tenant_id IS NULL) plus the
+    caller's tenant; never another tenant's curated set.
     Fallback (no API key OR empty table): substring overlap on examples.json.
     """
+    # Parse tenant_id; if not a UUID, only global (NULL) examples match.
+    tenant_uuid: str | None
+    try:
+        from uuid import UUID as _UUID
+
+        tenant_uuid = str(_UUID(str(tenant_id)))
+    except (ValueError, AttributeError):
+        tenant_uuid = None
+
     client = _get_embeddings_client()
     if client is not None:
         try:
             q_vec = await client.embed(question)
             q_literal = "[" + ",".join(f"{v:.6f}" for v in q_vec) + "]"
             async with SessionLocal() as s:
+                # SET LOCAL scopes to the surrounding tx; pgvector starts an
+                # implicit one for the SELECT so this takes effect.
+                await s.execute(
+                    text(f"SET LOCAL hnsw.ef_search = {SEARCH_EXAMPLES_EF_SEARCH}")
+                )
                 result = await s.execute(
                     text("""
                       SELECT question, plan, source_record_url,
-                             (embedding <=> CAST(:q AS halfvec)) AS distance
+                             (embedding <=> CAST(:q AS halfvec)) AS distance,
+                             1 - (embedding <=> CAST(:q AS halfvec)) AS similarity
                       FROM core.few_shot_examples
                       WHERE embedding_version = 'v1'
+                        AND (
+                          tenant_id IS NULL
+                          OR (CAST(:tenant_uuid AS text) IS NOT NULL
+                              AND tenant_id = CAST(:tenant_uuid AS uuid))
+                        )
+                        AND (embedding <=> CAST(:q AS halfvec)) <= :max_dist
                       ORDER BY embedding <=> CAST(:q AS halfvec)
                       LIMIT :k
                     """),
-                    {"q": q_literal, "k": k},
+                    {
+                        "q": q_literal,
+                        "k": k,
+                        "tenant_uuid": tenant_uuid,
+                        "max_dist": SEARCH_EXAMPLES_MAX_DISTANCE,
+                    },
                 )
                 rows = list(result.mappings())
             if rows:
@@ -117,13 +154,19 @@ async def search_examples(tenant_id: str, question: str, k: int = 5) -> dict[str
                             "distance": (
                                 float(r["distance"]) if r["distance"] is not None else None
                             ),
+                            "similarity": (
+                                float(r["similarity"]) if r["similarity"] is not None else None
+                            ),
                             "source_record_url": r["source_record_url"],
                         }
                         for r in rows
                     ],
                     "retrieval": "halfvec_cosine_nn",
                 }
-            log.info("few_shot_examples is empty; falling back to substring search")
+            log.info(
+                "no examples within distance %.2f; falling back to substring search",
+                SEARCH_EXAMPLES_MAX_DISTANCE,
+            )
         except Exception as e:
             log.warning("embedding-based search failed: %s; falling back", e)
 
@@ -222,32 +265,111 @@ async def compute_metric(
     }
 
 
+_ENTITY_TABLES: dict[str, str] = {
+    "order": 'core."order"',
+    "shipment": "core.shipment",
+    "refund": "core.refund",
+    "campaign": "core.campaign",
+    "ad_spend_daily": "core.ad_spend_daily",
+    "agent_runs": "core.agent_runs",
+}
+
+# Explicit per-entity column allowlist. Anything not listed (raw_payload_hash,
+# customer email/phone, addresses, internal source_id, …) is NOT exposed to
+# the LLM. Add columns deliberately, not by default.
+_ENTITY_COLUMNS: dict[str, list[str]] = {
+    "order": [
+        "tenant_id",
+        "canonical_id",
+        "placed_at",
+        "status",
+        "gateway",
+        "total",
+        "currency",
+        "shipping_pincode",
+        "source_system",
+        "source_record_url",
+    ],
+    "shipment": [
+        "tenant_id",
+        "canonical_id",
+        "order_canonical_id",
+        "courier",
+        "status",
+        "shipped_at",
+        "delivered_at",
+        "rto_at",
+        "destination_pincode",
+        "source_record_url",
+    ],
+    "refund": [
+        "tenant_id",
+        "canonical_id",
+        "order_canonical_id",
+        "amount",
+        "reason",
+        "refunded_at",
+        "source_record_url",
+    ],
+    "campaign": [
+        "tenant_id",
+        "canonical_id",
+        "name",
+        "status",
+        "objective",
+        "started_at",
+        "ended_at",
+        "source_record_url",
+    ],
+    "ad_spend_daily": [
+        "tenant_id",
+        "date",
+        "campaign_canonical_id",
+        "spend",
+        "impressions",
+        "clicks",
+        "conversions",
+        "source_record_url",
+    ],
+    "agent_runs": [
+        "tenant_id",
+        "run_id",
+        "agent_name",
+        "started_at",
+        "finished_at",
+        "status",
+        "summary",
+    ],
+}
+
+
 async def search_rows(
     tenant_id: str,
     entity: str,
     filter: dict[str, Any] | None = None,  # noqa: A002
     limit: int = 20,
 ) -> dict[str, Any]:
-    """Inspect rows from a core.* table. Allowlisted entities only."""
-    ALLOWED = {  # noqa: N806
-        "order": 'core."order"',
-        "shipment": "core.shipment",
-        "refund": "core.refund",
-        "campaign": "core.campaign",
-        "ad_spend_daily": "core.ad_spend_daily",
-        "agent_runs": "core.agent_runs",
-    }
-    if entity not in ALLOWED:
+    """Inspect rows from a core.* table. Allowlisted entities + columns only.
+
+    The column allowlist keeps PII (emails, phones, addresses) and raw
+    payload hashes out of the LLM context even if a future migration adds
+    such columns to a core.* table.
+    """
+    if entity not in _ENTITY_TABLES:
         raise ValueError(f"unknown entity: {entity}")
-    table = ALLOWED[entity]
+    table = _ENTITY_TABLES[entity]
+    columns = _ENTITY_COLUMNS[entity]
+    select_list = ", ".join(columns)
 
     where = "tenant_id = :tenant_id"
     params: dict[str, Any] = {"tenant_id": tenant_id, "limit": min(limit, 100)}
-    for raw_key, value in (filter or {}).items():
+    for raw_key, value in _coerce_date_filter(filter or {}).items():
         if "__" in raw_key:
             field, op = raw_key.rsplit("__", 1)
         else:
             field, op = raw_key, "eq"
+        if field not in columns and field != "tenant_id":
+            raise ValueError(f"unsupported filter field {field} for {entity}")
         pname = raw_key.replace("__", "_")
         if op == "eq":
             where += f" AND {field} = :{pname}"
@@ -261,7 +383,7 @@ async def search_rows(
         else:
             raise ValueError(f"unsupported op {op} for search_rows")
 
-    sql = f"SELECT * FROM {table} WHERE {where} LIMIT :limit"
+    sql = f"SELECT {select_list} FROM {table} WHERE {where} LIMIT :limit"
     async with SessionLocal() as s:
         result = await s.execute(text(sql), params)
         rows = [dict(r) for r in result.mappings()]
@@ -271,6 +393,7 @@ async def search_rows(
         "provenance": {
             "entity": entity,
             "table": table,
+            "columns": columns,
             "filter": filter or {},
             "row_pks": [r.get("canonical_id") or r.get("run_id") for r in rows],
         },
@@ -294,19 +417,69 @@ async def get_provenance(tenant_id: str, query_hash: str) -> dict[str, Any]:
     }
 
 
+_WRITE_KEYWORDS = frozenset(
+    {
+        "insert",
+        "update",
+        "delete",
+        "drop",
+        "truncate",
+        "alter",
+        "create",
+        "grant",
+        "revoke",
+        "copy",
+        "vacuum",
+        "merge",
+        "lock",
+        "comment",
+    }
+)
+
+# Strip string literals and -- / /* */ comments before scanning for write
+# keywords, so a benign `WHERE reason ILIKE '%delete%'` doesn't trigger.
+_STRING_LITERAL_RE = re.compile(r"'(?:[^']|'')*'")
+_LINE_COMMENT_RE = re.compile(r"--[^\n]*")
+_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _sql_keyword_tokens(sql: str) -> set[str]:
+    s = _BLOCK_COMMENT_RE.sub(" ", sql)
+    s = _LINE_COMMENT_RE.sub(" ", s)
+    s = _STRING_LITERAL_RE.sub(" ", s)
+    return {m.group().lower() for m in _IDENT_RE.finditer(s)}
+
+
 async def run_sql(tenant_id: str, sql: str, enable: bool = False) -> dict[str, Any]:
-    """Read-only SQL escape hatch. Disabled by default."""
+    """Read-only SQL escape hatch. Disabled by default.
+
+    The deny-list runs on tokenized, comment-stripped, literal-stripped SQL
+    so column/value text like 'delete_reason' or '%delete%' doesn't trigger
+    false rejections — and so a write keyword hidden in a comment can't
+    sneak through.
+    """
     if not enable:
         return {
             "error": "run_sql disabled. Pass enable=True after operator review.",
         }
-    if any(
-        kw in sql.lower()
-        for kw in ("insert ", "update ", "delete ", "drop ", "truncate ", "alter ")
-    ):
-        raise ValueError("run_sql is read-only")
+    # Reject multi-statement SQL outright — strip trailing whitespace/`;` only.
+    stripped = sql.strip().rstrip(";").strip()
+    # If there's still a `;` outside of a string/comment, it's multi-statement.
+    sanitized = _STRING_LITERAL_RE.sub("''", _BLOCK_COMMENT_RE.sub(" ", _LINE_COMMENT_RE.sub(" ", stripped)))
+    if ";" in sanitized:
+        raise ValueError("run_sql rejects multi-statement SQL")
+    tokens = _sql_keyword_tokens(stripped)
+    bad = tokens & _WRITE_KEYWORDS
+    if bad:
+        raise ValueError(f"run_sql is read-only (found: {sorted(bad)})")
+    # Enforce: must start with SELECT or WITH (CTE).
+    first_word_match = re.match(r"\s*([A-Za-z]+)", stripped)
+    first_word = first_word_match.group(1).lower() if first_word_match else ""
+    if first_word not in {"select", "with", "explain", "show"}:
+        raise ValueError(f"run_sql only allows SELECT/WITH/EXPLAIN/SHOW (got: {first_word})")
     async with SessionLocal() as s:
-        result = await s.execute(text(sql))
+        result = await s.execute(text(stripped))
         rows = [dict(r) for r in result.mappings()]
     return {"rows": rows, "row_count": len(rows)}
 

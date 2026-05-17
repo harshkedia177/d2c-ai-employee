@@ -72,6 +72,15 @@ def format_value(v: Any, fmt: str = "auto") -> str:
     return str(v)
 
 
+def format_for(metric_id: str) -> str:
+    """Map metric_id to a display format ("inr", "pct", "auto")."""
+    if "_rate" in metric_id or metric_id == "rto_rate":
+        return "pct"
+    if metric_id in ("gmv", "aov", "cac", "contribution_margin_per_order"):
+        return "inr"
+    return "auto"
+
+
 def render(
     draft: str,
     metric_results: dict[str, dict[str, Any]],

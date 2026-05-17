@@ -108,7 +108,10 @@ async def _step_embed() -> None:
         return
     from scripts.seed_examples import main_async as embed_main
 
-    await embed_main(dry_run=False)
+    # --auto: union manual curated examples with deterministically-generated
+    # ones from metrics.yml. --tenant-id: probe DB to skip examples for
+    # metrics the tenant has no signal on.
+    await embed_main(dry_run=False, auto=True, tenant_id=DEMO_TENANT_ID)
 
 
 async def _print_summary() -> None:

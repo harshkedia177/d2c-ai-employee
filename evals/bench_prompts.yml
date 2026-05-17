@@ -1,0 +1,39 @@
+# Bench prompts for /chat/stream latency harness.
+#
+# Each entry: {id, prompt, kind}
+#   kind ∈ {one_metric, two_metric, dimensional, refusal, clarify}
+#
+# Used by scripts/bench_chat_latency.py. The `kind` field lets the harness
+# group results by complexity in its summary table.
+
+- id: b01_gmv_simple
+  prompt: "What's my GMV?"
+  kind: one_metric
+
+- id: b02_gmv_date_filtered
+  prompt: "What was my GMV in the last 30 days?"
+  kind: one_metric
+
+- id: b03_gmv_and_aov
+  prompt: "Show me GMV and AOV."
+  kind: two_metric
+
+- id: b04_top_rto_pincodes
+  prompt: "What are my top pincodes by RTO rate?"
+  kind: dimensional
+
+- id: b05_gmv_aov_date_filtered
+  prompt: "GMV and AOV for the last 30 days vs the prior 30 days?"
+  kind: two_metric
+
+- id: b06_refusal_industry_benchmark
+  prompt: "What's the typical RTO rate for D2C brands in India?"
+  kind: refusal
+
+- id: b07_clarify_terse
+  prompt: "numbers?"
+  kind: clarify
+
+- id: b08_multi_metric_with_dimension
+  prompt: "Compare GMV and RTO rate broken down by top pincodes."
+  kind: dimensional

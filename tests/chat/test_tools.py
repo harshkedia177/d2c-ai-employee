@@ -301,6 +301,73 @@ async def test_search_examples_uses_halfvec_when_examples_indexed(monkeypatch):
         tools_mod._embeddings_client = None
 
 
+@pytest.mark.asyncio
+async def test_search_examples_does_not_leak_across_tenants(monkeypatch):
+    """Tenant A's curated example must not surface in tenant B's search."""
+    import json
+    import uuid
+    from datetime import UTC, datetime
+
+    from packages.chat import tools as tools_mod
+    from packages.llm.embeddings import FakeEmbeddings
+
+    fake = FakeEmbeddings()
+    monkeypatch.setattr(tools_mod, "_get_embeddings_client", lambda: fake)
+
+    tenant_a = str(uuid.uuid4())
+    tenant_b = str(uuid.uuid4())
+    secret_q = "Tenant A only: how is my secret KPI?"
+
+    def _fmt(v: list[float]) -> str:
+        return "[" + ",".join(f"{x:.6f}" for x in v) + "]"
+
+    async with SessionLocal() as cs:
+        await cs.execute(
+            text("DELETE FROM core.few_shot_examples WHERE source_record_url LIKE 'test://iso%'")
+        )
+        await cs.commit()
+    try:
+        async with SessionLocal() as s:
+            vec = await fake.embed(secret_q)
+            await s.execute(
+                text("""
+                  INSERT INTO core.few_shot_examples (
+                    tenant_id, question, plan, embedding,
+                    source_record_url, fetched_at, embedding_model, embedding_version
+                  ) VALUES (
+                    CAST(:t AS uuid), :q, CAST(:p AS jsonb), CAST(:e AS halfvec),
+                    :url, :ts, 'fake', 'v1'
+                  )
+                """),
+                {
+                    "t": tenant_a,
+                    "q": secret_q,
+                    "p": json.dumps([{"tool": "compute_metric"}]),
+                    "e": _fmt(vec),
+                    "url": "test://iso-a",
+                    "ts": datetime.now(UTC),
+                },
+            )
+            await s.commit()
+
+        # Same question, different tenant — should NOT see tenant A's example.
+        out_b = await search_examples(tenant_id=tenant_b, question=secret_q)
+        questions_b = [e["question"] for e in out_b.get("examples", [])]
+        assert secret_q not in questions_b, "tenant B leaked tenant A's example"
+
+        # Tenant A queries the same thing — should see it.
+        out_a = await search_examples(tenant_id=tenant_a, question=secret_q)
+        questions_a = [e["question"] for e in out_a.get("examples", [])]
+        assert secret_q in questions_a
+    finally:
+        async with SessionLocal() as cs:
+            await cs.execute(
+                text("DELETE FROM core.few_shot_examples WHERE source_record_url LIKE 'test://iso%'")
+            )
+            await cs.commit()
+        tools_mod._embeddings_client = None
+
+
 def test_tool_registry_has_seven_tools():
     assert len(TOOL_REGISTRY) == 7
     assert len(TOOL_SCHEMAS) == 7

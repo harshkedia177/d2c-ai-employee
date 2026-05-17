@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { fetchMetrics, type DimensionDef, type MetricDef } from "@/lib/api";
 
+type Data = { metrics: MetricDef[]; dimensions: DimensionDef[] };
+
 export function MetricsCatalogue() {
-  const [data, setData] = useState<
-    { metrics: MetricDef[]; dimensions: DimensionDef[] } | null
-  >(null);
+  const [data, setData] = useState<Data | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [q, setQ] = useState("");
 
   useEffect(() => {
     fetchMetrics()
@@ -15,198 +16,345 @@ export function MetricsCatalogue() {
       .catch((e) => setErr(String(e)));
   }, []);
 
-  const pagePad: React.CSSProperties = {
-    paddingTop: "clamp(1.5rem, 4vw, 3rem)",
-    paddingBottom: "clamp(2rem, 5vw, 5rem)",
-    marginLeft: "clamp(2rem, 8vw, 10rem)",
-    marginRight: "clamp(2rem, 5vw, 5rem)",
-    maxWidth: 1400,
-  };
+  const { metrics, dimensions } = useMemo(() => {
+    if (!data) return { metrics: [], dimensions: [] };
+    const needle = q.trim().toLowerCase();
+    if (!needle) return data;
+    const m = data.metrics.filter(
+      (x) =>
+        x.id.toLowerCase().includes(needle) ||
+        x.description.toLowerCase().includes(needle) ||
+        x.grain.toLowerCase().includes(needle),
+    );
+    const d = data.dimensions.filter(
+      (x) =>
+        x.id.toLowerCase().includes(needle) ||
+        x.sql.toLowerCase().includes(needle),
+    );
+    return { metrics: m, dimensions: d };
+  }, [data, q]);
 
-  if (err) {
-    return (
-      <main style={pagePad}>
+  return (
+    <main
+      style={{
+        maxWidth: 1200,
+        margin: "0 auto",
+        padding: "clamp(16px, 3vw, 28px) clamp(1rem, 3vw, 2rem) 5rem",
+      }}
+    >
+      <header style={{ marginBottom: 20 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 6,
+          }}
+        >
+          <span className="h-section">Semantic layer</span>
+          <span
+            className="font-mono"
+            style={{ fontSize: 11, color: "var(--ink-dim)" }}
+          >
+            metrics.yml
+          </span>
+        </div>
+        <h1 className="h-display" style={{ margin: 0, marginBottom: 8 }}>
+          The contract between numbers and rows.
+        </h1>
         <p
           style={{
+            color: "var(--ink-soft)",
+            fontSize: 14,
+            lineHeight: 1.55,
+            maxWidth: "70ch",
+            margin: 0,
+          }}
+        >
+          Every numerical claim the chat returns resolves through one of these
+          metric definitions. Each metric declares its{" "}
+          <span className="code-inline">grain</span> and minimum sample size
+          before it&apos;s allowed to answer — refusals are honest.
+          Dimensions provide the SQL columns metrics can group by.
+        </p>
+
+        {!err && data && (
+          <div
+            style={{
+              marginTop: 14,
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+              gap: 10,
+            }}
+          >
+            <Stat label="Metrics" value={data.metrics.length} />
+            <Stat label="Dimensions" value={data.dimensions.length} />
+            <Stat
+              label="Source file"
+              value={
+                <span className="font-mono" style={{ fontSize: 12 }}>
+                  packages/semantic_layer/metrics.yml
+                </span>
+              }
+            />
+          </div>
+        )}
+      </header>
+
+      {err && (
+        <div
+          className="card"
+          style={{
+            padding: 14,
+            background: "var(--danger-soft)",
             color: "var(--danger)",
-            fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
+            fontSize: 13,
           }}
         >
           Failed to load: {err}
-        </p>
-      </main>
-    );
-  }
-
-  if (!data) {
-    return (
-      <main style={pagePad}>
-        <p
-          style={{
-            fontFamily: "var(--font-fraunces), Georgia, serif",
-            fontStyle: "italic",
-            color: "var(--ink-soft)",
-          }}
-        >
-          Loading the catalogue…
-        </p>
-      </main>
-    );
-  }
-
-  return (
-    <main style={pagePad}>
-      <header style={{ marginBottom: "clamp(2rem, 4vw, 3.5rem)" }}>
-        <div className="eyebrow" style={{ marginBottom: "0.75rem" }}>
-          SEMANTIC LAYER · {data.metrics.length} METRICS ·{" "}
-          {data.dimensions.length} DIMENSIONS
         </div>
-        <h1
-          className="headline"
-          style={{
-            fontSize: "clamp(2rem, 4vw, 3.5rem)",
-            margin: 0,
-            color: "var(--ink)",
-          }}
-        >
-          Metrics &amp; Dimensions
-        </h1>
-        <p
-          className="editorial-body"
-          style={{
-            marginTop: "1rem",
-            maxWidth: "44ch",
-            color: "var(--ink-soft)",
-          }}
-        >
-          The contract between every numerical claim the chat surface returns
-          and the rows in the warehouse that back it. Edit{" "}
-          <span
+      )}
+
+      {!data && !err && (
+        <div style={{ color: "var(--ink-soft)", fontSize: 14 }}>
+          Loading the catalogue…
+        </div>
+      )}
+
+      {data && (
+        <>
+          <div
             style={{
-              fontFamily: "var(--font-geist-mono), ui-monospace, monospace",
-              fontSize: "0.92em",
+              position: "sticky",
+              top: 64,
+              zIndex: 30,
+              background: "var(--bg)",
+              padding: "8px 0 12px",
+              borderBottom: "1px solid var(--rule)",
+              marginBottom: 18,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
             }}
           >
-            packages/semantic_layer/metrics.yml
-          </span>{" "}
-          to extend.
-        </p>
-      </header>
-
-      <section style={{ marginTop: "clamp(2rem, 4vw, 3rem)" }}>
-        <h2
-          className="headline-italic"
-          style={{
-            fontSize: "1.5rem",
-            margin: 0,
-            paddingBottom: "0.5rem",
-            borderBottom: "1px solid var(--rule)",
-            color: "var(--ink)",
-          }}
-        >
-          Metrics
-        </h2>
-        <dl
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 14rem) minmax(0, 1fr)",
-            columnGap: "2.5rem",
-            rowGap: "1.75rem",
-            marginTop: "1.75rem",
-          }}
-        >
-          {data.metrics.map((m) => (
-            <div key={m.id} style={{ display: "contents" }}>
-              <dt
+            <input
+              type="search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Filter by id, description, or SQL fragment…"
+              className="input"
+              style={{ flex: "1 1 280px", maxWidth: 460 }}
+            />
+            {q && (
+              <span
                 className="font-mono"
-                style={{
-                  fontSize: "0.85rem",
-                  color: "var(--accent)",
-                  paddingTop: "0.15rem",
-                  letterSpacing: "0.02em",
-                }}
+                style={{ fontSize: 11, color: "var(--ink-dim)" }}
               >
-                {m.id}
-              </dt>
-              <dd
-                style={{
-                  margin: 0,
-                  fontFamily: "var(--font-fraunces), Georgia, serif",
-                  fontSize: "1.05rem",
-                  lineHeight: 1.55,
-                  color: "var(--ink)",
-                }}
-              >
-                {m.description}
-                <span
-                  className="eyebrow"
+                {metrics.length} metric{metrics.length === 1 ? "" : "s"} ·{" "}
+                {dimensions.length} dim{dimensions.length === 1 ? "" : "s"}
+              </span>
+            )}
+          </div>
+
+          <section style={{ marginBottom: 32 }}>
+            <SectionHeader
+              label="Metrics"
+              count={metrics.length}
+              total={data.metrics.length}
+            />
+            <div
+              className="card"
+              style={{ overflow: "hidden", padding: 0, marginTop: 10 }}
+            >
+              <table className="dtable">
+                <thead>
+                  <tr>
+                    <th style={{ width: "20%" }}>ID</th>
+                    <th>Description</th>
+                    <th style={{ width: 120 }}>Grain</th>
+                    <th className="right" style={{ width: 120 }}>
+                      Min sample
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {metrics.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={4}
+                        style={{
+                          padding: 18,
+                          textAlign: "center",
+                          color: "var(--ink-soft)",
+                          fontSize: 13,
+                        }}
+                      >
+                        No metrics match the filter.
+                      </td>
+                    </tr>
+                  )}
+                  {metrics.map((m) => (
+                    <tr key={m.id}>
+                      <td
+                        className="font-mono"
+                        style={{
+                          fontSize: 12,
+                          color: "var(--accent)",
+                          fontWeight: 500,
+                          letterSpacing: "0.01em",
+                        }}
+                      >
+                        {m.id}
+                      </td>
+                      <td
+                        style={{
+                          fontSize: 13,
+                          color: "var(--ink)",
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        {m.description}
+                      </td>
+                      <td>
+                        <span className="badge badge-neutral">{m.grain}</span>
+                      </td>
+                      <td className="right num">
+                        {m.min_sample_size ? (
+                          m.min_sample_size.toLocaleString()
+                        ) : (
+                          <span style={{ color: "var(--ink-dim)" }}>—</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section>
+            <SectionHeader
+              label="Dimensions"
+              count={dimensions.length}
+              total={data.dimensions.length}
+            />
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns:
+                  "repeat(auto-fill, minmax(min(420px, 100%), 1fr))",
+                gap: 10,
+                marginTop: 10,
+              }}
+            >
+              {dimensions.length === 0 && (
+                <div
+                  className="card"
                   style={{
-                    display: "block",
-                    marginTop: "0.4rem",
+                    padding: 18,
+                    textAlign: "center",
                     color: "var(--ink-soft)",
+                    fontSize: 13,
                   }}
                 >
-                  grain · {m.grain}
-                  {m.min_sample_size
-                    ? ` · min sample ${m.min_sample_size}`
-                    : ""}
-                </span>
-              </dd>
+                  No dimensions match the filter.
+                </div>
+              )}
+              {dimensions.map((d) => (
+                <div key={d.id} className="card" style={{ padding: 12 }}>
+                  <div
+                    className="font-mono"
+                    style={{
+                      fontSize: 12,
+                      color: "var(--accent)",
+                      fontWeight: 500,
+                      marginBottom: 6,
+                      letterSpacing: "0.01em",
+                    }}
+                  >
+                    {d.id}
+                  </div>
+                  <pre
+                    className="code-block"
+                    style={{
+                      margin: 0,
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {d.sql}
+                  </pre>
+                </div>
+              ))}
             </div>
-          ))}
-        </dl>
-      </section>
-
-      <section style={{ marginTop: "clamp(2.5rem, 5vw, 4rem)" }}>
-        <h2
-          className="headline-italic"
-          style={{
-            fontSize: "1.5rem",
-            margin: 0,
-            paddingBottom: "0.5rem",
-            borderBottom: "1px solid var(--rule)",
-            color: "var(--ink)",
-          }}
-        >
-          Dimensions
-        </h2>
-        <dl
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 14rem) minmax(0, 1fr)",
-            columnGap: "2.5rem",
-            rowGap: "1.25rem",
-            marginTop: "1.75rem",
-          }}
-        >
-          {data.dimensions.map((d) => (
-            <div key={d.id} style={{ display: "contents" }}>
-              <dt
-                className="font-mono"
-                style={{
-                  fontSize: "0.85rem",
-                  color: "var(--accent)",
-                  paddingTop: "0.15rem",
-                  letterSpacing: "0.02em",
-                }}
-              >
-                {d.id}
-              </dt>
-              <dd
-                className="font-mono"
-                style={{
-                  margin: 0,
-                  fontSize: "0.82rem",
-                  color: "var(--ink)",
-                  wordBreak: "break-word",
-                }}
-              >
-                {d.sql}
-              </dd>
-            </div>
-          ))}
-        </dl>
-      </section>
+          </section>
+        </>
+      )}
     </main>
+  );
+}
+
+function Stat({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div className="card" style={{ padding: 12 }}>
+      <div className="eyebrow">{label}</div>
+      <div
+        style={{
+          fontSize: 18,
+          fontWeight: 600,
+          marginTop: 4,
+          color: "var(--ink)",
+          letterSpacing: "-0.01em",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function SectionHeader({
+  label,
+  count,
+  total,
+}: {
+  label: string;
+  count: number;
+  total: number;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "baseline",
+        gap: 8,
+        paddingBottom: 4,
+      }}
+    >
+      <h2
+        style={{
+          margin: 0,
+          fontSize: 18,
+          fontWeight: 600,
+          color: "var(--ink)",
+          letterSpacing: "-0.01em",
+        }}
+      >
+        {label}
+      </h2>
+      <span
+        className="font-mono"
+        style={{ fontSize: 12, color: "var(--ink-dim)" }}
+      >
+        {count === total ? count : `${count}/${total}`}
+      </span>
+    </div>
   );
 }

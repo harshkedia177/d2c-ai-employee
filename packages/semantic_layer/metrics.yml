@@ -3,6 +3,7 @@ metrics:
     description: Gross merchandise value (sum of order totals)
     grain: order
     sources: [core.order]
+    dimensions_supported: [gateway, pincode, week, month]
     sql_aggregation: SUM(o.total)
     base_alias: o
     base_table: 'core."order"'
@@ -18,6 +19,7 @@ metrics:
     description: Average order value
     grain: order
     sources: [core.order]
+    dimensions_supported: [gateway, pincode, week, month]
     sql_aggregation: AVG(o.total)
     base_alias: o
     base_table: 'core."order"'
@@ -33,6 +35,7 @@ metrics:
     description: Share of shipped orders that ended in RTO
     grain: shipment
     sources: [core.shipment]
+    dimensions_supported: []
     sql_aggregation: |
       SUM(CASE WHEN s.is_rto THEN 1 ELSE 0 END)::numeric
       / NULLIF(COUNT(*), 0)
@@ -50,6 +53,7 @@ metrics:
     description: Customer acquisition cost (Meta spend / Shopify orders)
     grain: campaign_day
     sources: [core.ad_spend_daily, 'core."order"', core.campaign]
+    dimensions_supported: [campaign, ad_id]
     sql_aggregation: SUM(asd.spend) / NULLIF(COUNT(DISTINCT o.canonical_id), 0)
     base_alias: asd
     base_table: core.ad_spend_daily
@@ -72,6 +76,7 @@ metrics:
     description: Revenue net of RTO / Meta spend
     grain: campaign_day
     sources: [core.ad_spend_daily, 'core."order"', core.shipment, core.campaign]
+    dimensions_supported: [campaign, ad_id]
     sql_aggregation: |
       SUM(CASE WHEN COALESCE(s.is_rto, false) THEN 0 ELSE COALESCE(o.total, 0) END)
       / NULLIF(SUM(asd.spend), 0)
@@ -98,6 +103,7 @@ metrics:
     description: Order total - shipping - RTO writeoff (rough; v0 ignores allocated Meta spend)
     grain: order
     sources: ['core."order"', core.shipment]
+    dimensions_supported: [gateway]
     time_column: placed_at
     sql_aggregation: |
       AVG(
@@ -124,6 +130,7 @@ metrics:
     description: 90-day RTO rate by shipping pincode (gates n>=20)
     grain: pincode
     sources: ['core."order"', core.shipment]
+    dimensions_supported: [pincode]
     time_column: shipped_at
     sql_aggregation: |
       SUM(CASE WHEN s.is_rto THEN 1 ELSE 0 END)::numeric
@@ -145,6 +152,7 @@ metrics:
     description: 90-day RTO rate by SKU
     grain: sku
     sources: ['core."order"', core.order_line, core.shipment]
+    dimensions_supported: [sku]
     time_column: shipped_at
     sql_aggregation: |
       SUM(CASE WHEN s.is_rto THEN 1 ELSE 0 END)::numeric

@@ -22,9 +22,9 @@ Drop real `SHOPIFY_ACCESS_TOKEN` / `META_ACCESS_TOKEN` / `SHIPROCKET_EMAIL+PASSW
 
 - **Connectors:** Shopify Admin + Meta Marketing + Shiprocket behind one `Connector` Protocol. Real-API mode (documented auth + cursor pagination) or local `mock_saas` mode per connector, decided by which env vars are set.
 - **UDM:** Two-layer Postgres — `raw.*` JSONB landing, `core.*` typed canonical. **9 provenance columns NOT NULL on every core row.** Cross-source identity via deterministic UUIDv5 `canonical_id`. Hash-partitioned by `tenant_id` from day one.
-- **Chat:** Tool-use planner over 7 tools, semantic-layer-mediated. Citation contract enforced *architecturally* — LLM can't type a digit; placeholders → renderer → regex `Verifier` → 2 reject-retries → hard refuse with zero numerals.
+- **Chat:** LLMCompiler-shaped pipeline — **Plan → Parallel-Execute → Join → Stream Compose**. One planner LLM call emits a typed Pydantic DAG; deterministic executor fans out tool calls via `asyncio.gather`; joiner verifies (always on); composer streams tokens with inline placeholder substitution. p95 ~5s real-Gemini vs ~18s for the legacy ReAct loop. SSE endpoint `POST /chat/stream` streams events to the UI; `POST /chat` kept as JSON shim. Citation contract enforced architecturally — placeholders → renderer → regex `Verifier` → warning event on violation.
 - **Agents:** 3 agents on one `Agent` Protocol (RTO Risk Flagger, Meta Pauser, Pincode COD Blocker). All propose-only. Every run persists `reasoning`, `score`, `band`, `expected_savings_inr`, and `cited_provenance` to `core.agent_runs`.
-- **Scale harness:** Per-tenant Redis Lua-atomic token bucket, two-queue task system (realtime + backfill) with `SKIP LOCKED`, non-blocking webhook ingress (~4ms median), 16 hash partitions on every fast-growing table. 229 tests including an eval harness over 12 golden + 10 red-team prompts.
+- **Scale harness:** Per-tenant Redis Lua-atomic token bucket, two-queue task system (realtime + backfill) with `SKIP LOCKED`, non-blocking webhook ingress (~4ms median), 16 hash partitions on every fast-growing table. 246 tests including an eval harness over 12 golden + 10 red-team prompts.
 
 ---
 
@@ -70,25 +70,29 @@ Drop real `SHOPIFY_ACCESS_TOKEN` / `META_ACCESS_TOKEN` / `SHIPROCKET_EMAIL+PASSW
    └──────────────┬───────────────────┘   │ • Pincode COD Blocker (daily)     │
                   │                       │ propose-only → core.agent_runs    │
                   ▼                       └──────────────┬───────────────────┘
-   ┌──────────────────────────────────┐                  │
-   │ chat planner (tool-use loop)     │                  │
-   │ 7 tools incl. compute_metric     │                  │
-   │   ↓                              │                  │
-   │ {{m:placeholder}} → Renderer     │                  │
-   │   ↓                              │                  │
-   │ regex Verifier (no uncited       │                  │
-   │   digits survive) → 2 retries    │                  │
-   │   → hard refuse                  │                  │
-   └──────────────┬───────────────────┘                  │
-                  │                                      │
-                  ▼                                      ▼
-            FastAPI :8000  /chat  /runs  /webhooks/shopify
+   ┌─────────────────────────────────────────────────┐  │
+   │ chat orchestrator: Plan → Execute → Join → Compose│  │
+   │                                                 │  │
+   │  Planner LLM  (Gemini 3.1 Flash-Lite, JSON)     │  │
+   │     ↓ typed Plan (DAG of Tasks with $N refs)    │  │
+   │  Executor  asyncio.gather over compute_metric,  │  │
+   │            search_examples, search_rows         │  │
+   │     ↓ {task_id → result}                        │  │
+   │  Joiner LLM  (always on, finalize | replan ×1)  │  │
+   │     ↓                                           │  │
+   │  Composer LLM  (streaming, inline {{m:..}})     │  │
+   │     ↓ token / footnote / done SSE events        │  │
+   │  Verifier  warns on uncited literal digits      │  │
+   └──────────────┬──────────────────────────────────┘  │
+                  │                                     │
+                  ▼                                     ▼
+       FastAPI :8000  /chat  /chat/stream  /runs  /webhooks/shopify
                   │
                   ▼
-         Next.js :3000  chat_ui
+         Next.js :3000  chat_ui (SSE consumer)
 ```
 
-End-to-end one chat turn: planner → `get_schema` → `search_examples` → `compute_metric` (compiles SQL with citation projection, runs against `core.*`) → renderer substitutes `{{m:…}}` placeholders → regex verifier confirms no uncited numerals → response with footnotes back to source rows.
+One chat turn (SSE): planner emits a `Plan` of tool tasks → executor fans them out in parallel against the semantic layer → joiner inspects results (replan ≤1 if data missing) → composer streams tokens; placeholders are substituted inline so the wire emits already-cited text. Refusal (forecasts/benchmarks) and clarify (ambiguous) short-circuit before the executor. Hard timeouts: total `chat_total_timeout_s=60`, per-task `chat_per_task_timeout_s=15`, token budget `chat_request_token_budget=50_000`.
 
 ---
 
@@ -129,15 +133,18 @@ One shared Protocol in `packages/connectors/base.py:67-81` (`check / streams / r
 | `run_sql` | Off-by-default escape hatch — read-only, operator-flagged. |
 | `propose_write` | Write path, dry-run only. `dry_run=False` returns an error. |
 
-**How citation works:**
+**How citation works (orchestrator pipeline):**
 
-1. Planner emits placeholders like `{{m:gmv_0}}`, never digits.
-2. `Renderer` substitutes from `compute_metric()` returns — and that's the only path a number reaches the user.
-3. A regex `Verifier` (`NUMERAL_RE = \b\d[\d,]*(?:\.\d+)?\b`) scans the rendered draft. Any literal digit not in `substituted_values` → reject.
-4. Up to 2 reject-retries; then **hard refuse** with `status=refused_verifier_exhausted` and zero numerals.
-5. **No path exists where a literal digit reaches the user without a citation.** Proven by 12 golden + 10 red-team prompts in `evals/citation_contract_test.py`.
+1. **Planner** (Gemini 3.1 Flash-Lite, JSON-mode bound to a Pydantic `Plan` schema) emits a small DAG of `Task(tool, args)` — never raw numbers. The DAG supports `$task_id` refs so a downstream task can consume an upstream result.
+2. **Executor** (deterministic, no LLM) runs tasks in topological waves via `asyncio.gather`. `compute_metric` is the chokepoint — every metric query compiles with mandatory citation projection.
+3. **Joiner** (always on, per spec) inspects results and emits `finalize` or `replan` (capped at 1 replan). If the data is genuinely missing it asks the planner for a broader window; otherwise it finalizes.
+4. **Composer** (streaming) emits `{{m:placeholder}}` tokens; the orchestrator buffers partial placeholders and substitutes them inline as they complete — the SSE wire never carries raw `{{m:..}}` to the client.
+5. **Verifier** (`NUMERAL_RE = \b\d[\d,]*(?:\.\d+)?\b`) scans the final substituted text; any uncited literal digit emits a `warning` SSE event alongside the answer. The text is shipped because the client has already received it; the warning is the contract escalation.
+6. **Proven by 12 golden + 10 red-team prompts** in `evals/citation_contract_test.py` — every YAML case is a `(Plan, JoinerDecision, compose_chunks)` triple; refusal cases short-circuit before tools.
 
 We use a semantic layer (8 metrics) instead of raw text-to-SQL because Spider 2.0 SOTA is ~21% on raw text-to-SQL — and *grounded wrongness* (citation points faithfully at the wrong rows) is worse than hallucination. The compiler mandates that every metric query selects the 5 citation columns.
+
+**Why this shape vs ReAct.** The earlier implementation was a ReAct loop: LLM emits tool calls, sees results, decides next move, loop. Each turn was a 2–5s round-trip and complex questions needed 3–4 turns, putting p95 around 18s. The orchestrator collapses that to **3 fixed LLM hops** (plan + join + compose) with the tool fan-out done deterministically between them — measured **p50 3.49s / p95 4.91s** against real Gemini in `scripts/bench_chat_latency.py --mode real`.
 
 ---
 
@@ -205,12 +212,13 @@ See [`eval-honesty.md`](./eval-honesty.md). Top items the reviewer should hear f
 
 ## What I'd do with another week
 
-1. Run real load — 1k synthetic tenants, measure p95 chat latency + worker queue depth, find the actual first break.
+1. Run real load — 1k synthetic tenants, measure p95 chat latency + worker queue depth under concurrency (single-tenant p95 is already measured: 4.91s real-Gemini, see `scripts/bench_chat_latency.py`).
 2. Build the **cell router** (2k merchants/cell). Hash partitions are ready for it.
 3. **Embedding-based metric disambiguation** to fix the gross-vs-net confusion — store metric definitions as embeddings, pick the closest match instead of relying on the LLM's prior.
-4. **Token rotation worker** (Shiprocket 240h, Meta 60d).
-5. **Per-merchant tuning UI** for agent thresholds — the linear-weighted-score design only works if the founder can tune it.
-6. **Bulk Operations** for Shopify backfill.
+4. **Gemini prompt caching** — pad the planner + composer system prompts past the 4096-token implicit-cache minimum to shave another 30–50% off TTFT.
+5. **Token rotation worker** (Shiprocket 240h, Meta 60d).
+6. **Per-merchant tuning UI** for agent thresholds — the linear-weighted-score design only works if the founder can tune it.
+7. **Bulk Operations** for Shopify backfill.
 
 ---
 
@@ -251,12 +259,13 @@ packages/
   scaffolding/      # token bucket + two-queue task system — the harness
   semantic_layer/   # metrics.yml + SQL compiler with mandatory citation projection
   llm/              # LLMClient Protocol + GeminiClient + FakeLLMClient
-  chat/             # tools, planner, renderer, verifier
+  chat/             # tools, renderer, verifier
+  chat/orchestrator/  # plan, planner, executor, joiner, composer, events, budgets
   agents/           # Agent Protocol + 3 impls
-  api/              # FastAPI: /chat, /runs, /webhooks/shopify
+  api/              # FastAPI: /chat, /chat/stream (SSE), /runs, /webhooks/shopify
 mock_saas/          # FastAPI mocks for Shopify/Meta/Shiprocket + Faker seed w/ RTO signal
-apps/chat-ui/       # Next.js 16 / React 19 chat surface
-evals/              # 12 golden + 10 red-team + citation contract sanity tests
-tests/              # 229 tests mirroring packages/* paths
+apps/chat-ui/       # Next.js 16 / React 19 chat surface; SSE consumer
+evals/              # 12 golden + 10 red-team + bench prompts + citation contract harness
+tests/              # 246 tests mirroring packages/* paths
 ```
 

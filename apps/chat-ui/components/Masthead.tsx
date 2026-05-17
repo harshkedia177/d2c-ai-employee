@@ -1,44 +1,46 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Tenant } from "@/lib/api";
 
 type Props = {
   tenants: Tenant[];
   selectedTenantId: string;
   onChange: (id: string) => void;
+  backendOk: boolean;
 };
 
-function formatDate(d: Date): string {
-  const day = d.getDate();
-  const months = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-  ];
-  const weekdays = [
-    "Sunday", "Monday", "Tuesday", "Wednesday",
-    "Thursday", "Friday", "Saturday",
-  ];
-  return `${day} ${months[d.getMonth()]} ${d.getFullYear()} · ${weekdays[d.getDay()]} Edition`;
+function shortId(id: string): string {
+  if (!id) return "";
+  return `${id.slice(0, 8)}…${id.slice(-4)}`;
 }
 
-export function Masthead({ tenants, selectedTenantId, onChange }: Props) {
-  const [today, setToday] = useState<string>("");
+export function Masthead({
+  tenants,
+  selectedTenantId,
+  onChange,
+  backendOk,
+}: Props) {
+  const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    setToday(formatDate(new Date()));
+    const close = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
   }, []);
 
-  const tid = selectedTenantId;
-  const truncated = tid ? `${tid.slice(0, 8)}…${tid.slice(-4)}` : "";
+  const selected = tenants.find((t) => t.tenant_id === selectedTenantId);
 
   const copy = async () => {
-    if (!tid) return;
+    if (!selectedTenantId) return;
     try {
-      await navigator.clipboard.writeText(tid);
+      await navigator.clipboard.writeText(selectedTenantId);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
+      setTimeout(() => setCopied(false), 1100);
     } catch {
       /* noop */
     }
@@ -47,96 +49,245 @@ export function Masthead({ tenants, selectedTenantId, onChange }: Props) {
   return (
     <header
       style={{
-        marginLeft: "clamp(2rem, 8vw, 10rem)",
-        marginRight: "clamp(2rem, 5vw, 5rem)",
-        paddingTop: "clamp(2rem, 4vw, 3rem)",
+        position: "sticky",
+        top: 0,
+        zIndex: 50,
+        background: "color-mix(in oklch, var(--bg) 85%, transparent)",
+        backdropFilter: "saturate(140%) blur(8px)",
+        WebkitBackdropFilter: "saturate(140%) blur(8px)",
+        borderBottom: "1px solid var(--rule)",
       }}
     >
-      <div className="grid grid-cols-[1.2fr_1fr_1.2fr] items-end gap-6 pb-4">
-        <div>
+      <div
+        style={{
+          maxWidth: 1400,
+          margin: "0 auto",
+          padding: "12px clamp(1rem, 3vw, 2rem)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 16,
+        }}
+      >
+        {/* Brand */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div
-            className="headline"
+            aria-hidden
             style={{
-              fontSize: "clamp(2rem, 3.6vw, 3rem)",
-              letterSpacing: "-0.04em",
-              color: "var(--ink)",
+              width: 22,
+              height: 22,
+              borderRadius: 5,
+              background: "var(--accent)",
+              display: "grid",
+              placeItems: "center",
+              color: "var(--accent-ink)",
+              fontFamily: "var(--font-mono)",
+              fontWeight: 700,
+              fontSize: 12,
+              letterSpacing: "-0.02em",
             }}
           >
-            Shoppin Quarterly
+            S
           </div>
-          <div className="eyebrow mt-1">
-            D2C AI Employee · v0 · Issue 01
-          </div>
-        </div>
-
-        <div
-          className="headline-italic text-center"
-          style={{
-            fontSize: "clamp(0.95rem, 1.4vw, 1.2rem)",
-            color: "var(--ink-soft)",
-          }}
-        >
-          {today || " "}
-        </div>
-
-        <div className="flex flex-col items-end gap-1">
-          <label
-            className="eyebrow"
-            style={{ color: "var(--ink-soft)" }}
-            htmlFor="tenant-picker"
-          >
-            Tenant
-          </label>
-          <select
-            id="tenant-picker"
-            value={selectedTenantId}
-            onChange={(e) => onChange(e.target.value)}
-            style={{
-              fontFamily: "var(--font-fraunces), Georgia, serif",
-              fontVariationSettings: '"opsz" 14, "SOFT" 50',
-              fontStyle: "italic",
-              fontSize: "1rem",
-              color: "var(--ink)",
-              background: "transparent",
-              border: "none",
-              borderBottom: "1px solid var(--rule)",
-              padding: "2px 0",
-              textAlign: "right",
-              cursor: "pointer",
-            }}
-          >
-            {tenants.length === 0 && (
-              <option value="">— no tenants —</option>
-            )}
-            {tenants.map((t) => (
-              <option key={t.tenant_id} value={t.tenant_id}>
-                {t.slug}
-              </option>
-            ))}
-          </select>
-          {tid && (
-            <button
-              type="button"
-              onClick={copy}
-              className="font-mono"
-              title={copied ? "Copied" : "Click to copy tenant_id"}
+          <div style={{ display: "flex", flexDirection: "column", lineHeight: 1 }}>
+            <div
               style={{
-                fontSize: "0.66rem",
-                color: "var(--ink-soft)",
-                background: "transparent",
-                border: "none",
-                cursor: "pointer",
-                letterSpacing: "0.05em",
-                padding: 0,
+                fontSize: 14,
+                fontWeight: 600,
+                letterSpacing: "-0.01em",
+                color: "var(--ink)",
               }}
             >
-              {copied ? "COPIED ✓" : truncated}
+              Shoppin
+              <span
+                className="font-mono"
+                style={{
+                  marginLeft: 6,
+                  fontSize: 11,
+                  color: "var(--ink-dim)",
+                  fontWeight: 400,
+                  letterSpacing: "0.04em",
+                }}
+              >
+                / D2C AI Employee
+              </span>
+            </div>
+            <div
+              className="font-mono"
+              style={{
+                marginTop: 4,
+                fontSize: 10,
+                letterSpacing: "0.08em",
+                color: "var(--ink-dim)",
+                textTransform: "uppercase",
+              }}
+            >
+              v0 · issue 01
+            </div>
+          </div>
+        </div>
+
+        {/* Right cluster */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span
+            className="pill"
+            title={backendOk ? "Backend reachable" : "Backend unreachable"}
+            style={{
+              color: backendOk ? "var(--ok)" : "var(--danger)",
+              borderColor: backendOk
+                ? "color-mix(in oklch, var(--ok) 40%, var(--rule))"
+                : "color-mix(in oklch, var(--danger) 40%, var(--rule))",
+              background: "transparent",
+            }}
+          >
+            <span className="dot" />
+            {backendOk ? "online" : "offline"}
+          </span>
+
+          <div ref={ref} style={{ position: "relative" }}>
+            <button
+              type="button"
+              onClick={() => setOpen((x) => !x)}
+              className="btn"
+              style={{ paddingRight: 8 }}
+            >
+              <span
+                className="eyebrow"
+                style={{ color: "var(--ink-dim)", margin: 0 }}
+              >
+                Tenant
+              </span>
+              <span style={{ color: "var(--ink)" }}>
+                {selected?.slug ?? "—"}
+              </span>
+              <span
+                aria-hidden
+                style={{
+                  color: "var(--ink-dim)",
+                  fontSize: 10,
+                  marginLeft: 2,
+                }}
+              >
+                ▾
+              </span>
             </button>
-          )}
+
+            {open && (
+              <div
+                role="menu"
+                style={{
+                  position: "absolute",
+                  right: 0,
+                  top: "calc(100% + 6px)",
+                  minWidth: 280,
+                  background: "var(--surface)",
+                  border: "1px solid var(--rule)",
+                  borderRadius: 8,
+                  boxShadow:
+                    "0 8px 24px color-mix(in oklch, var(--ink) 12%, transparent)",
+                  padding: 6,
+                  zIndex: 60,
+                }}
+              >
+                <div
+                  className="eyebrow"
+                  style={{
+                    padding: "6px 8px 4px",
+                    borderBottom: "1px solid var(--rule-soft)",
+                    marginBottom: 4,
+                  }}
+                >
+                  Switch tenant
+                </div>
+                {tenants.length === 0 && (
+                  <div
+                    style={{
+                      padding: "8px 10px",
+                      color: "var(--ink-dim)",
+                      fontSize: 13,
+                    }}
+                  >
+                    No tenants returned.
+                  </div>
+                )}
+                {tenants.map((t) => {
+                  const active = t.tenant_id === selectedTenantId;
+                  return (
+                    <button
+                      key={t.tenant_id}
+                      role="menuitem"
+                      onClick={() => {
+                        onChange(t.tenant_id);
+                        setOpen(false);
+                      }}
+                      style={{
+                        width: "100%",
+                        textAlign: "left",
+                        background: active ? "var(--surface-2)" : "transparent",
+                        border: "none",
+                        cursor: "pointer",
+                        padding: "8px 10px",
+                        borderRadius: 5,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <span
+                        className="dot"
+                        style={{
+                          background: active ? "var(--accent)" : "transparent",
+                          border: active ? "none" : "1px solid var(--rule)",
+                        }}
+                      />
+                      <span style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, color: "var(--ink)" }}>
+                          {t.slug}
+                        </div>
+                        <div
+                          className="font-mono"
+                          style={{ fontSize: 10.5, color: "var(--ink-dim)" }}
+                        >
+                          {shortId(t.tenant_id)}
+                        </div>
+                      </span>
+                    </button>
+                  );
+                })}
+                {selectedTenantId && (
+                  <button
+                    type="button"
+                    onClick={copy}
+                    className="btn-ghost btn"
+                    style={{
+                      width: "100%",
+                      justifyContent: "space-between",
+                      marginTop: 4,
+                      borderTop: "1px solid var(--rule-soft)",
+                      borderRadius: 0,
+                      paddingTop: 8,
+                      paddingBottom: 8,
+                    }}
+                  >
+                    <span
+                      className="eyebrow"
+                      style={{ color: "var(--ink-soft)" }}
+                    >
+                      {copied ? "Copied" : "Copy tenant_id"}
+                    </span>
+                    <span
+                      className="font-mono"
+                      style={{ fontSize: 10.5, color: "var(--ink-dim)" }}
+                    >
+                      {shortId(selectedTenantId)}
+                    </span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
-
-      <div style={{ borderTop: "2px solid var(--ink)" }} />
     </header>
   );
 }

@@ -73,15 +73,25 @@ def _rewrite_time_filters(
     return out
 
 
-def _filter_clause(filters: dict[str, Any], base_alias: str) -> tuple[str, dict[str, Any]]:
+def _filter_clause(
+    filters: dict[str, Any],
+    base_alias: str,
+    dim_cfg: dict[str, dict[str, str]] | None = None,
+) -> tuple[str, dict[str, Any]]:
     parts: list[str] = []
     params: dict[str, Any] = {}
+    dim_cfg = dim_cfg or {}
     for raw_key, value in filters.items():
         if "__" in raw_key:
             field, op = raw_key.rsplit("__", 1)
         else:
             field, op = raw_key, "eq"
-        qualified = f"{base_alias}.{field}" if "." not in field else field
+        if field in dim_cfg:
+            qualified = dim_cfg[field]["sql"]
+        elif "." in field:
+            qualified = field
+        else:
+            qualified = f"{base_alias}.{field}"
         param_name = raw_key.replace(".", "_").replace("__", "_")
         if op == "gte":
             parts.append(f"{qualified} >= :{param_name}")
@@ -153,7 +163,7 @@ def compile_metric(
         dim_group_parts.append(dim_sql)
 
     filters = _rewrite_time_filters(filters or {}, meta.get("time_column"))
-    where_sql, params = _filter_clause(filters, base_alias)
+    where_sql, params = _filter_clause(filters, base_alias, dim_cfg)
     params["tenant_id"] = tenant_id
     params["citation_limit"] = citation_limit
 

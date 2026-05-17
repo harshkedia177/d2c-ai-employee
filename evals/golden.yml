@@ -1,126 +1,251 @@
-# Golden eval set — representative prompts that exercise each metric and
-# common dimension combinations. Each entry scripts the FakeLLMClient
-# tool-use sequence and asserts the rendered text + citation footprint.
-#
-# Coverage rule: every metric_id in the semantic layer must appear in at
-# least one prompt's must_cite_metric_id (enforced by
-# test_every_metric_id_appears_in_golden).
-
 - id: q01_gmv_total
-  prompt: "What's my GMV?"
-  script:
-    - tool: compute_metric
-      args: {metric_id: gmv}
-    - text: "Your GMV is {{m:gmv_0}}."
-  expected_substring_in_text: "₹"
-  must_cite_metric_id: gmv
-
-- id: q02_gmv_last_30_days
-  prompt: "What's my GMV last 30 days?"
-  script:
-    - tool: compute_metric
+  prompt: What's my GMV?
+  plan:
+    intent: answer
+    tasks:
+    - task_id: t1
+      tool: compute_metric
       args:
         metric_id: gmv
-        filters: {placed_at__gte: "2026-04-10"}
-    - text: "GMV in the requested window: {{m:gmv_0}}."
-  expected_substring_in_text: "₹"
+    composition_hint: State GMV in one sentence.
+  joiner:
+    action: finalize
+  compose_chunks:
+  - 'Your GMV is '
+  - '{{m:gmv_0}}'
+  - .
+  expected_substring_in_text: "\u20B9"
   must_cite_metric_id: gmv
-
+- id: q02_gmv_last_30_days
+  prompt: What's my GMV last 30 days?
+  plan:
+    intent: answer
+    tasks:
+    - task_id: t1
+      tool: compute_metric
+      args:
+        metric_id: gmv
+        filters:
+        - field: placed_at
+          op: gte
+          value: '2026-04-10'
+    composition_hint: State GMV for the requested window.
+  joiner:
+    action: finalize
+  compose_chunks:
+  - 'GMV in the requested window: '
+  - '{{m:gmv_0}}'
+  - .
+  expected_substring_in_text: "\u20B9"
+  must_cite_metric_id: gmv
 - id: q03_aov_by_month
-  prompt: "What's my AOV by month?"
-  script:
-    - tool: compute_metric
+  prompt: What's my AOV by month?
+  plan:
+    intent: answer
+    tasks:
+    - task_id: t1
+      tool: compute_metric
       args:
         metric_id: aov
-        dimensions: [month]
-    - text: "Here's AOV by month — see footnotes for breakdown."
-  expected_substring_in_text: "AOV"
+        dimensions:
+        - month
+    composition_hint: Summarise AOV by month; defer the breakdown to footnotes.
+  joiner:
+    action: finalize
+  compose_chunks:
+  - "Here's AOV by month \u2014 see footnotes for the breakdown."
+  expected_substring_in_text: AOV
   must_cite_metric_id: aov
-
 - id: q04_rto_rate
-  prompt: "What's my RTO rate?"
-  script:
-    - tool: compute_metric
-      args: {metric_id: rto_rate}
-    - text: "Your RTO rate is {{m:rto_rate_0}}."
-  expected_substring_in_text: "%"
+  prompt: What's my RTO rate?
+  plan:
+    intent: answer
+    tasks:
+    - task_id: t1
+      tool: compute_metric
+      args:
+        metric_id: rto_rate
+    composition_hint: State the RTO rate.
+  joiner:
+    action: finalize
+  compose_chunks:
+  - 'Your RTO rate is '
+  - '{{m:rto_rate_0}}'
+  - .
+  expected_substring_in_text: '%'
   must_cite_metric_id: rto_rate
-
 - id: q05_rto_by_pincode
-  prompt: "Which pincodes have the worst RTO?"
-  script:
-    - tool: compute_metric
-      args: {metric_id: pincode_rto_rate_90d, dimensions: [pincode]}
-    - text: "Here are the worst pincodes — see footnotes."
-  expected_substring_in_text: "pincode"
+  prompt: Which pincodes have the worst RTO?
+  plan:
+    intent: answer
+    tasks:
+    - task_id: t1
+      tool: compute_metric
+      args:
+        metric_id: pincode_rto_rate_90d
+        dimensions:
+        - pincode
+    composition_hint: Surface the worst pincodes; footnote per row.
+  joiner:
+    action: finalize
+  compose_chunks:
+  - "Here are the worst pincodes \u2014 see footnotes."
+  expected_substring_in_text: pincode
   must_cite_metric_id: pincode_rto_rate_90d
-
 - id: q06_cac_by_campaign
-  prompt: "What's my CAC by campaign?"
-  script:
-    - tool: compute_metric
-      args: {metric_id: cac, dimensions: [campaign]}
-    - text: "CAC by campaign — see footnotes for figures."
-  expected_substring_in_text: "campaign"
+  prompt: What's my CAC by campaign?
+  plan:
+    intent: answer
+    tasks:
+    - task_id: t1
+      tool: compute_metric
+      args:
+        metric_id: cac
+        dimensions:
+        - campaign
+    composition_hint: Report CAC by campaign; per-row figures live in footnotes.
+  joiner:
+    action: finalize
+  compose_chunks:
+  - "CAC by campaign \u2014 see footnotes for figures."
+  expected_substring_in_text: campaign
   must_cite_metric_id: cac
-
 - id: q07_post_rto_roas_last_week
-  prompt: "What's my post-RTO ROAS by campaign last 7 days?"
-  script:
-    - tool: compute_metric
+  prompt: What's my post-RTO ROAS by campaign last 7 days?
+  plan:
+    intent: answer
+    tasks:
+    - task_id: t1
+      tool: compute_metric
       args:
         metric_id: post_rto_roas
-        dimensions: [campaign]
-        filters: {date__gte: "2026-05-03"}
-    - text: "Post-RTO ROAS by campaign over last 7d — see footnotes."
-  expected_substring_in_text: "ROAS"
+        dimensions:
+        - campaign
+        filters:
+        - field: date
+          op: gte
+          value: '2026-05-03'
+    composition_hint: Report post-RTO ROAS by campaign over the requested window.
+  joiner:
+    action: finalize
+  compose_chunks:
+  - "Post-RTO ROAS by campaign over the last week \u2014 see footnotes."
+  expected_substring_in_text: ROAS
   must_cite_metric_id: post_rto_roas
-
 - id: q08_contribution_margin
-  prompt: "What's my contribution margin per order?"
-  script:
-    - tool: compute_metric
-      args: {metric_id: contribution_margin_per_order}
-    - text: "Contribution margin per order: {{m:contribution_margin_per_order_0}}."
-  expected_substring_in_text: "₹"
-  must_cite_metric_id: contribution_margin_per_order
-
-- id: q09_sku_rto
-  prompt: "Which SKUs have the highest RTO?"
-  script:
-    - tool: compute_metric
-      args: {metric_id: sku_rto_rate_90d, dimensions: [sku]}
-    - text: "SKUs ranked by RTO rate — see footnotes."
-  expected_substring_in_text: "SKU"
-  must_cite_metric_id: sku_rto_rate_90d
-
-- id: q10_search_rows
-  prompt: "Show me orders from Cash on Delivery."
-  script:
-    - tool: search_rows
-      args: {entity: order, filter: {gateway: "Cash on Delivery"}, limit: 10}
-    - text: "Here are recent COD orders — see the table."
-  expected_substring_in_text: "COD"
-  must_cite_metric_id: null
-
-- id: q11_propose_write_dry_run
-  prompt: "Pause underperforming campaigns."
-  script:
-    - tool: propose_write
+  prompt: What's my contribution margin per order?
+  plan:
+    intent: answer
+    tasks:
+    - task_id: t1
+      tool: compute_metric
       args:
-        action_type: pause_campaign
-        payload: {summary: "would pause some campaigns", row_pks: ["c1","c2","c3"]}
-    - text: "Drafted a pause proposal — review the diff before approving."
-  expected_substring_in_text: "Drafted"
+        metric_id: contribution_margin_per_order
+    composition_hint: State contribution margin per order in one sentence.
+  joiner:
+    action: finalize
+  compose_chunks:
+  - 'Contribution margin per order: '
+  - '{{m:contribution_margin_per_order_0}}'
+  - .
+  expected_substring_in_text: "\u20B9"
+  must_cite_metric_id: contribution_margin_per_order
+- id: q09_sku_rto
+  prompt: Which SKUs have the highest RTO?
+  plan:
+    intent: answer
+    tasks:
+    - task_id: t1
+      tool: compute_metric
+      args:
+        metric_id: sku_rto_rate_90d
+        dimensions:
+        - sku
+    composition_hint: List SKUs ranked by RTO rate; footnote per row.
+  joiner:
+    action: finalize
+  compose_chunks:
+  - "SKUs ranked by RTO rate \u2014 see footnotes."
+  expected_substring_in_text: SKU
+  must_cite_metric_id: sku_rto_rate_90d
+- id: q10_search_rows
+  prompt: Show me orders from Cash on Delivery.
+  plan:
+    intent: answer
+    tasks:
+    - task_id: t1
+      tool: search_rows
+      args:
+        entity: order
+        filter:
+          gateway: Cash on Delivery
+        limit: 10
+    composition_hint: Acknowledge the COD orders pulled; the UI renders the table.
+  joiner:
+    action: finalize
+  compose_chunks:
+  - "Here are recent COD orders \u2014 see the table."
+  expected_substring_in_text: COD
   must_cite_metric_id: null
-
-- id: q12_two_metrics_one_answer
-  prompt: "What's my GMV and AOV?"
-  script:
-    - tool: compute_metric
-      args: {metric_id: gmv}
-    - tool: compute_metric
-      args: {metric_id: aov}
-    - text: "GMV {{m:gmv_0}}, AOV {{m:aov_0}}."
-  expected_substring_in_text: "₹"
+- id: q11_two_metrics_one_answer
+  prompt: What's my GMV and AOV?
+  plan:
+    intent: answer
+    tasks:
+    - task_id: t1
+      tool: compute_metric
+      args:
+        metric_id: gmv
+    - task_id: t2
+      tool: compute_metric
+      args:
+        metric_id: aov
+    composition_hint: Report GMV and AOV together in one sentence.
+  joiner:
+    action: finalize
+  compose_chunks:
+  - 'GMV '
+  - '{{m:gmv_0}}'
+  - ', AOV '
+  - '{{m:aov_0}}'
+  - .
+  expected_substring_in_text: "\u20B9"
+  must_cite_metric_id: gmv
+- id: q12_gmv_two_windows
+  prompt: What's my GMV last month vs the prior month?
+  plan:
+    intent: answer
+    tasks:
+    - task_id: t1
+      tool: compute_metric
+      args:
+        metric_id: gmv
+        filters:
+        - field: placed_at
+          op: gte
+          value: '2026-04-16'
+        - field: placed_at
+          op: lte
+          value: '2026-05-16'
+    - task_id: t2
+      tool: compute_metric
+      args:
+        metric_id: gmv
+        filters:
+        - field: placed_at
+          op: gte
+          value: '2026-03-16'
+        - field: placed_at
+          op: lte
+          value: '2026-04-15'
+    composition_hint: Compare GMV over the two windows in one sentence.
+  joiner:
+    action: finalize
+  compose_chunks:
+  - 'GMV last month was '
+  - '{{m:gmv_0}}'
+  - ', versus '
+  - '{{m:gmv_1}}'
+  - ' the prior month.'
+  expected_substring_in_text: "\u20B9"
   must_cite_metric_id: gmv

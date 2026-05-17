@@ -11,6 +11,24 @@ class Settings(BaseSettings):
     redis_url: str
     gemini_api_key: str = ""
 
+    # /chat orchestration knobs
+    chat_max_turns: int = 8
+    chat_max_verify_retries: int = 2
+    chat_total_timeout_s: float = 60.0
+    chat_llm_timeout_s: float = 30.0
+    chat_llm_retries: int = 2
+
+    # Per-stage model selection (orchestrator). gemini-3.1-flash-lite is GA
+    # and defaults to thinking_level=minimal — fastest 3.x option.
+    chat_planner_model: str = "gemini-3.1-flash-lite"
+    chat_joiner_model: str = "gemini-3.1-flash-lite"
+    chat_composer_model: str = "gemini-3.1-flash-lite"
+
+    # Per-request guardrails (MAST + Anthropic taxonomies).
+    chat_request_token_budget: int = 50_000
+    chat_max_replans: int = 1
+    chat_per_task_timeout_s: float = 15.0
+
     shopify_base_url: str = "http://localhost:9000/shopify"
     meta_base_url: str = "http://localhost:9000/meta"
     shiprocket_base_url: str = "http://localhost:9000/shiprocket"

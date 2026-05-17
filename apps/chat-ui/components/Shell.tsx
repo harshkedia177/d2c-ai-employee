@@ -7,24 +7,31 @@ import { Nav } from "./Nav";
 function ShellInner({ children }: { children: React.ReactNode }) {
   const { tenants, tenantId, setTenantId, error } = useTenant();
   return (
-    <div style={{ minHeight: "100vh", background: "var(--paper)" }}>
+    <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
       <Masthead
         tenants={tenants}
         selectedTenantId={tenantId}
         onChange={setTenantId}
+        backendOk={!error}
       />
       <Nav />
       {error && (
         <div
-          className="eyebrow"
           style={{
-            marginLeft: "clamp(2rem, 8vw, 10rem)",
-            marginRight: "clamp(2rem, 5vw, 5rem)",
-            paddingTop: "1rem",
+            maxWidth: 1400,
+            margin: "0 auto",
+            padding: "10px clamp(1rem, 3vw, 2rem)",
+            background: "var(--danger-soft)",
             color: "var(--danger)",
+            fontSize: 12.5,
+            borderBottom: "1px solid var(--rule)",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
           }}
         >
-          Cannot reach backend: {error}. Is uvicorn running on :8000?
+          <span className="dot" />
+          Backend unreachable — {error}. Is uvicorn running on :8000?
         </div>
       )}
       {children}

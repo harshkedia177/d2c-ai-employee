@@ -238,7 +238,7 @@ class RTORiskFlagger:
                 tenant_id=tenant_id,
                 metric_id="pincode_rto_rate_90d",
                 dimensions=["pincode"],
-                filters={"shipping_pincode": pincode},
+                filters={"pincode": pincode},
             )
         except Exception as e:
             log.warning("pincode metric failed: %s", e)
