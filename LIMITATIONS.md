@@ -1,6 +1,6 @@
-# Eval Honesty
+# Limitations & honest evaluation
 
-The point of this doc is to say the hard parts out loud before a reviewer has to find them. Every system this size has rough edges; pretending otherwise is the fastest way to lose trust. Here's the honest tour.
+The point of this doc is to say the hard parts out loud instead of leaving them for someone to trip over. Every system this size has rough edges; pretending otherwise is the fastest way to lose trust. Here's the honest tour.
 
 ## Where it works
 
@@ -30,7 +30,7 @@ The RTO agent is the hero of the system; it's also the one with the most operati
 - **False positives are expensive.** Roughly ₹400 LTV per legit customer turned away. The MEDIUM band is deliberately soft — it adds a WhatsApp confirm and a small COD fee, it never auto-drops COD. The hard "switch to prepaid" suggestion only fires in HIGH band, and even then only as a proposal.
 - **Webhook lag during BFCM/Diwali spikes.** Under burst load, the score can arrive *after* the AWB is generated, at which point the agent's recommendation is moot. A polling-fallback path for high-AOV orders is sketched in the design doc; not built.
 - **Concept drift after sale events.** Pincode RTO rates spike during BFCM, which means a score trained on pre-sale data is wrong about post-sale risk. The recommendation is to recompute weekly; there's no scheduler enforcing it.
-- **Adversarial gaming** (a fraudster using a clean pincode and a disposable phone number to defeat the score) is explicitly out of scope here. The defense is a learned model with a fraud-graph signal — a much bigger build than this assignment scopes.
+- **Adversarial gaming** (a fraudster using a clean pincode and a disposable phone number to defeat the score) is explicitly out of scope here. The defense is a learned model with a fraud-graph signal — a much bigger build than this milestone scopes.
 
 ### Meta Campaign Pauser
 
@@ -58,11 +58,11 @@ The RTO agent is the hero of the system; it's also the one with the most operati
 
 ## What we did NOT build, by choice
 
-These are conscious omissions, not oversights. Each one has a reason that's true at the scope of this submission.
+These are conscious omissions, not oversights. Each one has a reason that's true at the current scope.
 
 - **Marts (dbt-style aggregated tables).** Premature. Canonical plus on-demand SQL handles the current query latencies cleanly, and adding a marts layer before it actually hurts ends up freezing in place. Worth revisiting if and when chat P95 starts losing.
 - **Interactive OAuth (Partner Dashboard / Business Manager install flow).** Each connector authenticates with the platform's documented server-to-server credential — Shopify Custom App access token, Meta System User token, Shiprocket API user. The dual-mode `mock_saas → real API` switch is wired and exercised end to end. App-store-style OAuth (popup, scopes review, redirect URI handshake) is the missing piece if this were ever shipped as a multi-tenant Shopify App Store install; for an "AI employee" deployed per merchant the credential path is what production looks like.
-- **Auto-execution of writes.** The brief explicitly says no, and frankly it'd be reckless without per-merchant tuning anyway. `propose_write(dry_run=True)` is the only path; calling with `dry_run=False` returns a clear error rather than executing.
+- **Auto-execution of writes.** Deliberately excluded — it'd be reckless without per-merchant tuning. `propose_write(dry_run=True)` is the only path; calling with `dry_run=False` returns a clear error rather than executing.
 - **Multi-currency normalization beyond INR.** Indian D2C is the focus, so the FX normalization layer would be theoretical work.
 - **A polished, production Next.js chat UI.** `POST /chat` works perfectly and the bundled `apps/chat-ui` is a thin shell over it — enough to drive the demo end to end, but not a full product surface. A dedicated run-log viewer with timeline scrubbing wasn't built; the run-log JSON is accessible via `/runs` and queryable from chat.
 

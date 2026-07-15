@@ -86,7 +86,7 @@ One chat turn (SSE): planner emits a `Plan` of tool tasks → executor fans them
 
 ---
 
-## 1. What I built (5-line summary)
+## What I built
 
 - **Connectors:** Shopify Admin + Meta Marketing + Shiprocket behind one `Connector` Protocol. Real-API mode (documented auth + cursor pagination) or local `mock_saas` mode per connector, decided by which env vars are set.
 - **UDM:** Two-layer Postgres — `raw.*` JSONB landing, `core.*` typed canonical. **9 provenance columns NOT NULL on every core row.** Cross-source identity via deterministic UUIDv5 `canonical_id`. Hash-partitioned by `tenant_id` from day one.
@@ -96,19 +96,19 @@ One chat turn (SSE): planner emits a `Plan` of tool tasks → executor fans them
 
 ---
 
-## 2. Connectors — why these 3
+## Connectors — why these three
 
 - **Shopify** — orders, COGS, COD-vs-prepaid split, customers.
 - **Meta Marketing** — campaign/ad spend with attributed conversions.
 - **Shiprocket** — AWB, courier, RTO status, freight, NDR. **The leak nobody else sees.**
 
-Razorpay was the runner-up. It lost because Shopify already records gateway + amount + status, while **RTO is the dominant rupee leak in Indian D2C** (28–35% on COD, COD is 60–70% of order volume). Without Shiprocket you can reconcile payments but you can't answer the founder's real question. And this is an assignment for Shiprocket — the Shiprocket connector was table stakes either way.
+Razorpay was the runner-up. It lost because Shopify already records gateway + amount + status, while **RTO is the dominant rupee leak in Indian D2C** (28–35% on COD, COD is 60–70% of order volume). Without Shiprocket you can reconcile payments but you can't answer the founder's real question, so the shipment connector is table stakes either way.
 
 One shared Protocol in `packages/connectors/base.py:67-81` (`check / streams / read`). Each connector is testable in isolation with `respx`-mocked HTTP. Real-mode auth matches the documented contract: Shopify `X-Shopify-Access-Token` header + Link-header pagination, Meta `access_token` query param + `paging.cursors.after` cursors, Shiprocket Bearer token from `POST /v1/external/auth/login` (240h TTL).
 
 ---
 
-## 3. Schema — why this shape
+## Schema — why this shape
 
 - **Two layers, no marts:** `raw.<source>_<stream>` (immutable JSONB landing, append-only) → `core.<entity>` (typed canonical). Canonical + on-demand SQL handles current query latency; dragging in dbt before it actually hurts is the kind of scaffolding that freezes in place.
 - **9 mandatory provenance columns on every `core.*` row** (`source_system, source_id, source_record_url, raw_table, raw_row_id, raw_payload_hash, fetched_at, ingested_at, connector_version`), 8 of 9 enforced `NOT NULL` at the schema layer. Source-agnostic vocabulary (Segment Ecommerce + Shopify-shaped names) — adding Magento next quarter doesn't reshape downstream consumers.
@@ -119,7 +119,7 @@ One shared Protocol in `packages/connectors/base.py:67-81` (`check / streams / r
 
 ---
 
-## 4. Chat — tool schema + how citation works
+## Chat — tool schema + how citation works
 
 **7 tools exposed to the planner** (`packages/chat/tools.py`):
 
@@ -148,9 +148,9 @@ We use a semantic layer (8 metrics) instead of raw text-to-SQL because Spider 2.
 
 ---
 
-## 5. Agent — what it does, why this one
+## Agents — what they do, why these
 
-**RTO Risk Flagger** is the hero (webhook-triggered, the "AI employee" the brief asks for). Two other agents (Meta Pauser, Pincode COD Blocker) ship under the same `Agent` Protocol to prove the abstraction.
+**RTO Risk Flagger** is the hero (webhook-triggered — the core "AI employee" use case). Two other agents (Meta Pauser, Pincode COD Blocker) ship under the same `Agent` Protocol to prove the abstraction.
 
 | Agent | Trigger | Watches | Proposes | ₹-saving rationale |
 |---|---|---|---|---|
@@ -162,11 +162,11 @@ We use a semantic layer (8 metrics) instead of raw text-to-SQL because Spider 2.
 
 **Propose-only.** `make_run_log` hard-codes `dry_run: True`. No `httpx`/`requests` import anywhere in `packages/agents/`. Every run persists `reasoning`, `score`, `band`, `expected_savings_inr`, `evidence`, `cited_provenance` to `core.agent_runs` — queryable from chat as *"show me what the RTO agent flagged today."*
 
-**Failure modes called out** in `eval-honesty.md`: cold-start pincode (`n<20` → flag-for-review, never auto-block), cold-start customer (hand-tuned prior), false-positive cost (~₹400 LTV), webhook lag during BFCM, adversarial gaming.
+**Failure modes called out** in [`LIMITATIONS.md`](./LIMITATIONS.md): cold-start pincode (`n<20` → flag-for-review, never auto-block), cold-start customer (hand-tuned prior), false-positive cost (~₹400 LTV), webhook lag during BFCM, adversarial gaming.
 
 ---
 
-## 6. Scale — 1 → 10k merchants
+## Scaling — 1 → 10k merchants
 
 **What breaks first:** rate-limit pressure on third-party APIs during onboarding waves, not webhook volume. Shiprocket doesn't publish per-plan request quotas, tokens expire every 240h, and there's no bulk-export endpoint — 50 simultaneous merchant onboardings each backfilling 90 days starts getting rejected.
 
@@ -179,13 +179,13 @@ We use a semantic layer (8 metrics) instead of raw text-to-SQL because Spider 2.
 
 **What's sketched but not built** (honest list): cell router (~2k merchants/cell, blast radius 10k → 200), DuckDB/ClickHouse offload (`core.order` JSONB beyond ~4–8TB), Shopify Bulk Operations, token rotation worker (Shiprocket 240h, Meta 60d), per-tier QoS.
 
-**10k merchants was never tested above ~100 simultaneous tenants.** Harness exists; cluster doesn't. Called out up front in `eval-honesty.md`.
+**10k merchants was never tested above ~100 simultaneous tenants.** Harness exists; cluster doesn't. Called out up front in `LIMITATIONS.md`.
 
 ---
 
-## 7. Eval — where it breaks
+## Known limitations
 
-See [`eval-honesty.md`](./eval-honesty.md). Top items the reviewer should hear from me first:
+See [`LIMITATIONS.md`](./LIMITATIONS.md). The sharpest edges worth knowing up front:
 
 - **Planner picks the wrong metric on ~3–5% of golden prompts** in informal testing (typically gross-vs-net confusion, or wrong time grain). The eval gate is *"no uncited numerals,"* not *"answer is correct."*
 - **Cross-source attribution joins** (Meta `utm_campaign` ↔ Shopify orders) depend on merchant having UTMs configured. Degrades gracefully (zero attributed revenue), doesn't surface the misconfiguration in chat.
@@ -194,31 +194,21 @@ See [`eval-honesty.md`](./eval-honesty.md). Top items the reviewer should hear f
 
 ---
 
-## 8. Hours / AI tool disclosure
+## Non-goals (by design)
 
-- **Time:** built across the May 10 → May 14 window in 3–4 working sessions.
-- **AI tools:** Claude / GPT-class models used heavily as a pair-programmer. I drove all architecture decisions (which 3 connectors, two-layer UDM, citation contract enforced via regex verifier, propose-only agents, harness shape) and the eval/test strategy. The LLM wrote most of the implementation under tight per-file review. The README + eval-honesty are my framing; LLM helped tighten prose. Commit history is the receipt.
-
----
-
-## 9. What I'd do with another week
-
-1. Run real load — 1k synthetic tenants, measure p95 chat latency + worker queue depth under concurrency (single-tenant p95 is already measured: 4.91s real-Gemini, see `scripts/bench_chat_latency.py`).
-2. Build the **cell router** (2k merchants/cell). Hash partitions are ready for it.
-3. **Embedding-based metric disambiguation** to fix the gross-vs-net confusion — store metric definitions as embeddings, pick the closest match instead of relying on the LLM's prior.
-4. **Gemini prompt caching** — pad the planner + composer system prompts past the 4096-token implicit-cache minimum to shave another 30–50% off TTFT.
-5. **Token rotation worker** (Shiprocket 240h, Meta 60d).
-6. **Per-merchant tuning UI** for agent thresholds — the linear-weighted-score design only works if the founder can tune it.
-7. **Bulk Operations** for Shopify backfill.
-
----
-
-## What I explicitly did NOT build
-
-- **Marts layer (dbt-style)** — premature.
+- **Marts layer (dbt-style)** — premature at this scale.
 - **Interactive App-Store-style OAuth flows** — credential-based auth (Shopify Custom App token, Meta System User token, Shiprocket API user) is what production looks like for a per-merchant deployment.
-- **Auto-execution of writes** — brief says no. `propose_write(dry_run=False)` errors out.
+- **Auto-execution of writes** — reckless without per-merchant tuning. `propose_write(dry_run=False)` errors out; every action is propose-only.
 - **Multi-currency beyond INR** — Indian D2C focus.
+
+## Roadmap
+
+- Real load testing — 1k synthetic tenants, measuring p95 chat latency + worker queue depth under concurrency (single-tenant p95 is already measured at 4.91s real-Gemini, see `scripts/bench_chat_latency.py`).
+- The **cell router** (2k merchants/cell) — the hash partitions are already in place for it.
+- **Embedding-based metric disambiguation** to fix gross-vs-net confusion — store metric definitions as embeddings and pick the closest match instead of relying on the LLM's prior.
+- **Gemini prompt caching** — pad the planner + composer system prompts past the 4096-token implicit-cache minimum to shave 30–50% off TTFT.
+- **Token rotation worker** (Shiprocket 240h, Meta 60d) and **Shopify Bulk Operations** for backfill.
+- **Per-merchant tuning UI** for agent thresholds — the linear-weighted score only earns trust if the founder can tune it.
 
 ---
 
