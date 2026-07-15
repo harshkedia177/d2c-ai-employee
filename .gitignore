@@ -12,3 +12,6 @@ node_modules/
 **/node_modules/
 .next/
 **/.next/
+# macOS
+.DS_Store
+**/.DS_Store
